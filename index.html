@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sakura</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      /* IMMERSIVE SCROLLBAR */
+      /* Chrome, Safari, Edge */
+      ::-webkit-scrollbar {
+        width: 0px;
+        height: 0px; /* Hide horizontal scrollbars too */
+        background: transparent;
+      }
+      
+      /* Firefox */
+      * {
+        scrollbar-width: none;
+      }
+      
+      body {
+        /* System Font Stack for Privacy & Performance */
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        background-color: var(--bg-main);
+        color: var(--text-main);
+        transition: background-color 0.6s cubic-bezier(0.2, 0.8, 0.2, 1), color 0.6s ease;
+        overflow: hidden; /* AppShell handles scrolling */
+      }
+      
+      h1, h2, h3, h4, h5, h6, .serif {
+        font-family: Iowan Old Style, Apple Garamond, Baskerville, Times New Roman, Droid Serif, Times, Source Serif Pro, serif;
+      }
+
+      /* CINEMATIC EASING */
+      :root {
+        --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+        --ease-in-out-soft: cubic-bezier(0.76, 0, 0.24, 1);
+        --ease-elastic: cubic-bezier(0.68, -0.6, 0.32, 1.6);
+        
+        /* THEME: Sakura Night (Deep, Warm, Charcoal) */
+        --bg-main: #191716; 
+        --bg-card: #23201f; 
+        --bg-overlay: rgba(25, 23, 22, 0.85);
+        --text-main: #e6e0dc; 
+        --text-muted: #8a8583; 
+        --border-color: #332f2d; 
+        --accent: #d15e69; 
+        --shadow-elevation: 0 20px 40px -10px rgba(0,0,0,0.6);
+      }
+
+      :root[data-theme="ivory-paper"] {
+        /* THEME: Ivory Paper (Gallery, Warm, Clean) */
+        --bg-main: #fcfbf9;
+        --bg-card: #ffffff;
+        --bg-overlay: rgba(252, 251, 249, 0.9);
+        --text-main: #383533;
+        --text-muted: #999491;
+        --border-color: #edebe8;
+        --accent: #d15e69;
+        --shadow-elevation: 0 20px 40px -10px rgba(189, 180, 172, 0.4);
+      }
+
+      :root[data-theme="ink-blossom"] {
+        /* THEME: Ink (High Contrast, Mono) */
+        --bg-main: #0a0a0a;
+        --bg-card: #141414;
+        --bg-overlay: rgba(10, 10, 10, 0.95);
+        --text-main: #ffffff;
+        --text-muted: #666666;
+        --border-color: #333333;
+        --accent: #ffffff;
+        --shadow-elevation: 0 10px 30px -10px rgba(255,255,255,0.1);
+      }
+      
+      .wall-shadow {
+        box-shadow: var(--shadow-elevation);
+      }
+
+      /* Horizontal Scroll Snap Utils */
+      .snap-x-mandatory {
+        scroll-snap-type: x mandatory;
+      }
+      .snap-center {
+        scroll-snap-align: center;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@^19.2.3",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "idb": "https://esm.sh/idb@8.0.0",
+    "clsx": "https://esm.sh/clsx@2.1.0",
+    "webworker": "https://esm.sh/webworker@^0.8.4",
+    "pdfjs-dist": "https://esm.sh/pdfjs-dist@3.11.174",
+    "jszip": "https://esm.sh/jszip@3.10.1"
+  }
+}
+</script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      // Use absolute path for SW to avoid relative path issues in sub-directories/previews
+      navigator.serviceWorker.register('/sw.js', { scope: '/' })
+        .then(reg => console.log('Service Worker registered'))
+        .catch(err => console.log('Service Worker registration failed (expected in some preview envs): ', err));
+    });
+  }
+</script>
+</head>
+  <body class="antialiased overflow-hidden selection:bg-rose-200 selection:text-rose-900" data-theme="sakura-night">
+    <div id="root"></div>
+  </body>
+</html>

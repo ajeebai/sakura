@@ -1,0 +1,5 @@
+{
+  "name": "Sakura",
+  "description": "A privacy-first, offline-only reader for graphic novels and image libraries. No cloud, no tracking, just you and your stories.",
+  "requestFramePermissions": []
+}
