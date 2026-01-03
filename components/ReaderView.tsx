@@ -199,10 +199,19 @@ export const ReaderView: React.FC<ReaderViewProps> = ({ book, onClose, onUpdateP
           e.preventDefault();
           const zoomSensitivity = 0.005; // Finer zoom
           const delta = -e.deltaY * zoomSensitivity;
-          const newScale = Math.min(Math.max(1, scale + delta), 5); // Max zoom 5x
+          
+          let newScale = scale + delta;
+          
+          // Snap to 100% if close
+          if (Math.abs(newScale - 1) < 0.05) newScale = 1;
+
+          // Allow zooming out to 25% and up to 500%
+          newScale = Math.min(Math.max(0.25, newScale), 5);
 
           transform.current.scale = newScale;
-          if (newScale === 1) {
+          
+          // Reset pan if zoomed out or exactly 100% (auto-center)
+          if (newScale <= 1) {
               transform.current.panX = 0;
               transform.current.panY = 0;
           }
@@ -222,12 +231,12 @@ export const ReaderView: React.FC<ReaderViewProps> = ({ book, onClose, onUpdateP
           return;
       }
 
-      // 3. Native Vertical Scroll (Vertical Mode @ 1x)
+      // 3. Native Vertical Scroll (Vertical Mode @ 1x or less)
       if (settings.viewMode === 'vertical') {
           return; // Allow native scroll
       }
 
-      // 4. Page Turning (Single Mode @ 1x) - Horizontal Swipe
+      // 4. Page Turning (Single Mode @ 1x or less) - Horizontal Swipe
       // Swipe Logic: Accumulate deltas to detect intention
       if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
           e.preventDefault(); // Stop Browser Back gesture
