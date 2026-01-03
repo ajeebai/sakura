@@ -1,7 +1,6 @@
-
 import React from 'react';
 import { Library } from '../types';
-import { Plus, Trash, Palette, Folder } from '@phosphor-icons/react';
+import { Plus, Trash2, Palette, Folder } from 'lucide-react';
 
 interface LibraryListProps {
   libraries: Library[];
@@ -66,7 +65,7 @@ export const LibraryList: React.FC<LibraryListProps> = ({
                         }}
                         className="opacity-0 group-hover:opacity-100 p-2 text-[var(--text-muted)] hover:text-red-500 transition-all"
                     >
-                        <Trash className="w-4 h-4" />
+                        <Trash2 className="w-4 h-4" />
                     </button>
                 </div>
 

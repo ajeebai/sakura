@@ -129,13 +129,3 @@ export interface ReaderSettings {
     textureMode: 'none' | 'grain' | 'halftone' | 'fabric';
     transitionMode: 'none' | 'slide' | 'flip' | 'datamosh';
 }
-
-// --- Menu Types ---
-export type MenuContextType = 'GLOBAL' | 'BOOK' | 'READER';
-
-export interface MenuContext {
-    type: MenuContextType;
-    x: number;
-    y: number;
-    data?: any; // Book object, etc.
-}

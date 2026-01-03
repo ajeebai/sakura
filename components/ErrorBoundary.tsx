@@ -1,6 +1,5 @@
-
 import React, { ErrorInfo, ReactNode } from "react";
-import { Warning, ArrowsClockwise, Trash } from '@phosphor-icons/react';
+import { AlertTriangle, RefreshCw, Trash2 } from 'lucide-react';
 import { deleteDB } from 'idb';
 
 interface Props {
@@ -47,7 +46,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
         <div className="min-h-screen bg-stone-900 flex items-center justify-center p-6 text-stone-200 font-sans">
             <div className="max-w-md w-full bg-stone-800 rounded-2xl p-8 border border-stone-700 shadow-2xl">
                 <div className="flex items-center justify-center w-16 h-16 bg-red-900/20 rounded-full mb-6 mx-auto">
-                    <Warning className="w-8 h-8 text-red-500" />
+                    <AlertTriangle className="w-8 h-8 text-red-500" />
                 </div>
                 <h1 className="text-2xl font-serif text-center mb-2 text-stone-100">Something went wrong</h1>
                 <p className="text-stone-400 text-center mb-6 text-sm">
@@ -63,7 +62,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
                         onClick={this.handleReset}
                         className="w-full flex items-center justify-center py-3 bg-stone-100 text-stone-900 rounded-lg font-bold hover:bg-white transition-colors"
                     >
-                        <ArrowsClockwise className="w-4 h-4 mr-2" />
+                        <RefreshCw className="w-4 h-4 mr-2" />
                         Reload App
                     </button>
                     
@@ -71,7 +70,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
                         onClick={this.handleHardReset}
                         className="w-full flex items-center justify-center py-3 border border-stone-600 text-stone-400 rounded-lg hover:bg-red-900/20 hover:text-red-400 hover:border-red-900/50 transition-colors text-sm"
                     >
-                        <Trash className="w-4 h-4 mr-2" />
+                        <Trash2 className="w-4 h-4 mr-2" />
                         Reset Database
                     </button>
                 </div>

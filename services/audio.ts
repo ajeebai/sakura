@@ -99,48 +99,30 @@ export const playPageTurnSfx = () => {
     } catch (e) {}
 };
 
-// Heavy Thud for the Hanko Stamp
+// New: Heavy Thud for the Hanko Stamp
 export const playThumpSfx = () => {
     try {
         const ctx = initAudio();
-        const t = ctx.currentTime;
-        
-        // 1. Low Thud (Sine)
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
+        const filter = ctx.createBiquadFilter();
+
         osc.type = 'sine';
-        osc.frequency.setValueAtTime(120, t);
-        osc.frequency.exponentialRampToValueAtTime(40, t + 0.2);
-        gain.gain.setValueAtTime(0.8, t);
-        gain.gain.exponentialRampToValueAtTime(0.01, t + 0.25);
-        osc.connect(gain);
+        osc.frequency.setValueAtTime(100, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(10, ctx.currentTime + 0.3);
+
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(200, ctx.currentTime);
+
+        gain.gain.setValueAtTime(0.8, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+
+        osc.connect(filter);
+        filter.connect(gain);
         gain.connect(ctx.destination);
-        osc.start(t);
-        osc.stop(t + 0.3);
 
-        // 2. Paper Impact (Noise Burst)
-        const bufferSize = ctx.sampleRate * 0.15; // 150ms
-        const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-        const data = buffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) {
-            data[i] = (Math.random() * 2 - 1) * 0.8;
-        }
-        const noise = ctx.createBufferSource();
-        noise.buffer = buffer;
-        
-        const noiseGain = ctx.createGain();
-        const noiseFilter = ctx.createBiquadFilter();
-        noiseFilter.type = 'lowpass';
-        noiseFilter.frequency.value = 500;
-
-        noiseGain.gain.setValueAtTime(0.6, t);
-        noiseGain.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
-
-        noise.connect(noiseFilter);
-        noiseFilter.connect(noiseGain);
-        noiseGain.connect(ctx.destination);
-        noise.start(t);
-
+        osc.start();
+        osc.stop(ctx.currentTime + 0.3);
     } catch(e) {}
 };
 

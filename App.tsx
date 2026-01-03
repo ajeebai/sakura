@@ -7,9 +7,9 @@ import { LibraryList } from './components/LibraryList';
 import { AppShell } from './components/AppShell';
 import { RadialMenu } from './components/RadialMenu';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { AppState, Library, BookMetadata, ReadingProgress, Theme, ReaderSettings, LibraryViewMode, MenuContext, Playlist, Book } from './types';
+import { AppState, Library, BookMetadata, ReadingProgress, Theme, ReaderSettings, LibraryViewMode } from './types';
 import { LibraryScanner } from './services/libraryScanner';
-import { initDB, dbGetLibraries, dbAddLibrary, dbDeleteLibrary, dbGetBooksForLibrary, dbGetAllProgress, dbUpdateBook, dbSaveProgress, dbGetSetting, dbSaveSetting, dbGetReaderSettings, dbSaveReaderSettings, dbGetPlaylists, dbCreatePlaylist, dbAddBookToPlaylist, dbRemoveBookFromPlaylist, dbDeletePlaylist, dbGetBookmarksForBook, dbAddBookmark, dbRemoveBookmark } from './services/db';
+import { initDB, dbGetLibraries, dbAddLibrary, dbDeleteLibrary, dbGetBooksForLibrary, dbGetAllProgress, dbUpdateBook, dbSaveProgress, dbGetSetting, dbSaveSetting, dbGetReaderSettings, dbSaveReaderSettings } from './services/db';
 import { hydrateBook, verifyPermission } from './services/fileSystem';
 import { processLegacyFileList, scanFilesFromDataTransfer } from './utils/fileSystemPolyfill';
 import { playClickSfx, playHoverSfx, setAtmosphere } from './services/audio';
@@ -36,17 +36,6 @@ const SakuraApp: React.FC = () => {
   
   const [libViewMode, setLibViewMode] = useState<LibraryViewMode>('category');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
-  
-  // Radial Menu State
-  const [menuContext, setMenuContext] = useState<MenuContext | null>(null);
-  
-  // Playlist State
-  const [playlists, setPlaylists] = useState<Playlist[]>([]);
-  
-  // Bookmarks State for Reader
-  const [activeBookBookmarks, setActiveBookBookmarks] = useState<Set<number>>(new Set());
-  const [readerCurrentPage, setReaderCurrentPage] = useState(0);
-
   const legacyInputRef = useRef<HTMLInputElement>(null);
 
   const refreshLibraries = useCallback(async () => {
@@ -54,21 +43,15 @@ const SakuraApp: React.FC = () => {
     return libs;
   }, []);
 
-  const refreshPlaylists = useCallback(async () => {
-      const pl = await dbGetPlaylists();
-      setPlaylists(pl);
-  }, []);
-
   // Initialization
   useEffect(() => {
     const startUp = async () => {
       try {
         await initDB();
-        const [libs, savedTheme, savedSettings, _pl] = await Promise.all([
+        const [libs, savedTheme, savedSettings] = await Promise.all([
             refreshLibraries(),
             dbGetSetting('theme'),
-            dbGetReaderSettings(),
-            refreshPlaylists()
+            dbGetReaderSettings()
         ]);
         
         const initialTheme = savedTheme?.value || 'sakura-night';
@@ -101,94 +84,18 @@ const SakuraApp: React.FC = () => {
       }
     };
     startUp();
-  }, [refreshLibraries, refreshPlaylists]);
+  }, [refreshLibraries]);
 
-  // Global Context Menu Handler (Right Click)
   useEffect(() => {
-      const handleGlobalContextMenu = (e: MouseEvent) => {
-          e.preventDefault();
-          // If we are NOT in the reader view, and NOT right-clicking a book card (handled separately)
-          // We trigger the global menu.
-          // Note: BookCard and ReaderView stopPropagation, so this only fires on background.
-          
-          if (state.view === 'LIBRARY' || state.view === 'LIBRARY_LIST') {
-               setMenuContext({
-                   type: 'GLOBAL',
-                   x: e.clientX,
-                   y: e.clientY
-               });
-               if(settings.enableSfx) playClickSfx();
+      const handleMove = (e: MouseEvent) => {
+          if (settings.lightingMode === 'spotlight') {
+              document.documentElement.style.setProperty('--cursor-x', `${e.clientX}px`);
+              document.documentElement.style.setProperty('--cursor-y', `${e.clientY}px`);
           }
       };
-      
-      window.addEventListener('contextmenu', handleGlobalContextMenu);
-      return () => window.removeEventListener('contextmenu', handleGlobalContextMenu);
-  }, [state.view, settings.enableSfx]);
-
-  const handleBookContextMenu = (e: React.MouseEvent, book: Book) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setMenuContext({
-          type: 'BOOK',
-          x: e.clientX,
-          y: e.clientY,
-          data: book
-      });
-      if(settings.enableSfx) playClickSfx();
-  };
-
-  const handleReaderContextMenu = (e: React.MouseEvent, pageIndex: number) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setMenuContext({
-          type: 'READER',
-          x: e.clientX,
-          y: e.clientY
-      });
-      if(settings.enableSfx) playClickSfx();
-  };
-
-  const handleCloseMenu = () => setMenuContext(null);
-
-  // --- Playlist Actions ---
-  const handleCreatePlaylist = async () => {
-      const name = prompt("Enter playlist name:");
-      if (name) {
-          await dbCreatePlaylist(name);
-          await refreshPlaylists();
-      }
-  };
-
-  const handleAddToPlaylist = async (playlistId: string, bookId: string) => {
-      await dbAddBookToPlaylist(playlistId, bookId);
-      await refreshPlaylists();
-      setMenuContext(null);
-  };
-  
-  const handleDeletePlaylist = async (id: string) => {
-      if(confirm('Delete this playlist?')) {
-          await dbDeletePlaylist(id);
-          await refreshPlaylists();
-      }
-  };
-
-  // --- Reader Actions ---
-  const handleTogglePageBookmark = async () => {
-      if (!state.activeBookId) return;
-      
-      const newSet = new Set(activeBookBookmarks);
-      if (newSet.has(readerCurrentPage)) {
-          newSet.delete(readerCurrentPage);
-          await dbRemoveBookmark(state.activeBookId, readerCurrentPage);
-      } else {
-          newSet.add(readerCurrentPage);
-          await dbAddBookmark(state.activeBookId, readerCurrentPage);
-      }
-      setActiveBookBookmarks(newSet);
-      if(settings.enableSfx) playClickSfx();
-      setMenuContext(null); // Close menu after action
-  };
-
+      window.addEventListener('mousemove', handleMove);
+      return () => window.removeEventListener('mousemove', handleMove);
+  }, [settings.lightingMode]);
 
   // --- Handlers ---
   const handleToggleTheme = async (newTheme: Theme) => {
@@ -226,7 +133,10 @@ const SakuraApp: React.FC = () => {
   };
 
   const processNativeHandle = async (dirHandle: any) => {
+    // 1. Set loading immediately to show the spinner on Welcome Screen
     setState(prev => ({ ...prev, loading: true, loadingMessage: 'Scanning library...' }));
+    
+    // 2. Add delay to ensure React renders the loader before blocking event loop
     setTimeout(async () => {
         try {
             const libraryId = crypto.randomUUID();
@@ -391,12 +301,6 @@ const SakuraApp: React.FC = () => {
     const bookIndex = state.libraryBooks.findIndex(b => b.id === bookId);
     if (bookIndex === -1) return;
     const book = state.libraryBooks[bookIndex];
-    
-    // Load Bookmarks for this book
-    const marks = await dbGetBookmarksForBook(bookId);
-    setActiveBookBookmarks(new Set(marks));
-    setReaderCurrentPage(book.readingProgress?.currentPageIndex || 0);
-
     if (book.pages && book.pages.length > 0) {
         setState(prev => ({ ...prev, activeBookId: bookId, view: 'READER', loading: false }));
         return;
@@ -428,36 +332,23 @@ const SakuraApp: React.FC = () => {
 
   const activeBook = state.libraryBooks.find(b => b.id === state.activeBookId);
 
+  const handleBack = () => {
+      if (state.view === 'READER') handleCloseReader();
+      else if (state.view === 'LIBRARY') handleGoHome();
+  };
+
   return (
     <>
         <RadialMenu 
-            context={menuContext}
-            onClose={handleCloseMenu}
-            
-            // Data
-            currentTheme={state.theme} 
-            settings={settings}
-            viewMode={libViewMode}
-            playlists={playlists}
-            isPageBookmarked={activeBookBookmarks.has(readerCurrentPage)}
-
-            // Actions
-            onThemeChange={handleToggleTheme}
-            onSettingChange={handleSettingChange}
-            onViewModeChange={setLibViewMode}
+            currentView={state.view}
+            onBack={handleBack}
             onSearch={() => setIsSearchOpen(true)}
-            onGoHome={handleGoHome}
-            
-            onToggleFavorite={(bookId) => {
-                 const book = state.libraryBooks.find(b => b.id === bookId);
-                 if (book) handleUpdateBook(bookId, { isFavorite: !book.isFavorite });
-                 setMenuContext(null);
-            }}
-            onAddToPlaylist={handleAddToPlaylist}
-            onCreatePlaylist={handleCreatePlaylist}
-            onEditBook={() => { /* Edit Modal Triggered by local state usually, we can refactor later if needed, but context menu usually just opens edit modal */}}
-            
-            onTogglePageBookmark={handleTogglePageBookmark}
+            currentTheme={state.theme} 
+            onThemeChange={handleToggleTheme}
+            settings={settings}
+            onSettingChange={handleSettingChange}
+            viewMode={libViewMode}
+            onViewModeChange={setLibViewMode}
         />
 
         <input type="file" ref={legacyInputRef} className="hidden" multiple onChange={handleLegacyFileSelect} {...{ webkitdirectory: "", directory: "" } as any} />
@@ -477,10 +368,6 @@ const SakuraApp: React.FC = () => {
               onUpdateProgress={handleUpdateProgress}
               settings={settings} 
               onSettingChange={handleSettingChange}
-              onContextMenu={handleReaderContextMenu}
-              currentPage={readerCurrentPage}
-              setCurrentPage={setReaderCurrentPage}
-              bookmarks={activeBookBookmarks}
             />
         ) : (
              <AppShell
@@ -512,10 +399,6 @@ const SakuraApp: React.FC = () => {
                       enableSfx={settings.enableSfx}
                       isSearchOpen={isSearchOpen}
                       onToggleSearch={setIsSearchOpen}
-                      onContextMenu={handleBookContextMenu}
-                      playlists={playlists}
-                      onCreatePlaylist={handleCreatePlaylist}
-                      onDeletePlaylist={handleDeletePlaylist}
                     />
                 )}
              </AppShell>

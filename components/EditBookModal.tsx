@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect } from 'react';
 import { Book } from '../types';
-import { X, Heart, EyeSlash, FloppyDisk, Tag } from '@phosphor-icons/react';
+import { X, Heart, EyeOff, Save, Tag } from 'lucide-react';
 
 interface EditBookModalProps {
   book: Book;
@@ -92,7 +91,7 @@ export const EditBookModal: React.FC<EditBookModalProps> = ({ book, isOpen, onCl
                   : 'bg-white border-stone-200 text-stone-500 hover:bg-stone-50'
               }`}
             >
-              <Heart weight={isFavorite ? "fill" : "regular"} className="w-5 h-5" />
+              <Heart className={`w-5 h-5 ${isFavorite ? 'fill-current' : ''}`} />
               <span className="font-medium text-sm">Favorite</span>
             </button>
 
@@ -105,7 +104,7 @@ export const EditBookModal: React.FC<EditBookModalProps> = ({ book, isOpen, onCl
                   : 'bg-white border-stone-200 text-stone-500 hover:bg-stone-50'
               }`}
             >
-              <EyeSlash className="w-5 h-5" />
+              <EyeOff className="w-5 h-5" />
               <span className="font-medium text-sm">Hidden</span>
             </button>
           </div>
@@ -124,7 +123,7 @@ export const EditBookModal: React.FC<EditBookModalProps> = ({ book, isOpen, onCl
             onClick={handleSave}
             className="px-6 py-2 text-sm font-bold text-white bg-stone-900 hover:bg-rose-600 rounded-lg shadow-lg shadow-stone-200 hover:shadow-rose-200 transition-all flex items-center gap-2"
           >
-            <FloppyDisk className="w-4 h-4" />
+            <Save className="w-4 h-4" />
             Save Changes
           </button>
         </div>
