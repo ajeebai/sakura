@@ -1,14 +1,11 @@
-import React, { useEffect, useState, useCallback, useRef, useLayoutEffect } from 'react';
-import { Book, FileHandle, ReaderSettings, ImageFitMode, ReadingDirection } from '../types';
+
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { Book, FileHandle, ReaderSettings } from '../types';
 import { getFileUrl } from '../services/fileSystem';
-import { dbGetReaderSettings, dbSaveReaderSettings, dbAddBookmark, dbRemoveBookmark, dbGetBookmarksForBook } from '../services/db';
-import { 
-    ArrowLeft, Maximize2, Minimize2, ZoomIn, ZoomOut, 
-    MoveVertical, Smartphone, AlertTriangle, 
-    Settings2, ArrowRightLeft, Expand, Monitor, AlignCenter,
-    ChevronLeft, ChevronRight, Play, Pause, Heart, Sparkles, Scissors
-} from 'lucide-react';
+import { ArrowLeft, AlignJustify, Bookmark as BookmarkIcon } from 'lucide-react';
 import * as pdfjsLibProxy from 'pdfjs-dist';
+import { playClickSfx, playPageTurnSfx, playThumpSfx } from '../services/audio';
+import { dbUpdateBook, dbAddBookmark, dbRemoveBookmark, dbGetBookmarksForBook } from '../services/db';
 
 const pdfjsLib: any = (pdfjsLibProxy as any).default || pdfjsLibProxy;
 if (pdfjsLib.GlobalWorkerOptions) {
@@ -19,21 +16,135 @@ interface ReaderViewProps {
   book: Book;
   onClose: () => void;
   onUpdateProgress: (bookId: string, pageIndex: number, totalPages: number) => void;
+  settings: ReaderSettings;
+  onSettingChange: (k: keyof ReaderSettings, v: any) => void;
 }
 
-// --- PDF Page Component ---
-const PdfPage: React.FC<{
+// --- Helper Components ---
+
+const PdfThumbnail: React.FC<{
     pdfDoc: any;
-    pageIndex: number; 
-    scale: number;
+    pageIndex: number;
     isActive: boolean;
-    className?: string;
-    onRenderSuccess?: () => void;
-}> = React.memo(({ pdfDoc, pageIndex, scale, isActive, className, onRenderSuccess }) => {
+}> = React.memo(({ pdfDoc, pageIndex, isActive }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const renderTaskRef = useRef<any>(null);
-    const [error, setError] = useState(false);
 
+    useEffect(() => {
+        if (!isActive || !pdfDoc || !canvasRef.current) return;
+        let active = true;
+        const render = async () => {
+            try {
+                const page = await pdfDoc.getPage(pageIndex);
+                if (!active) return;
+                const viewport = page.getViewport({ scale: 0.15 }); 
+                const canvas = canvasRef.current!;
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
+                const context = canvas.getContext('2d');
+                if (renderTaskRef.current) renderTaskRef.current.cancel();
+                renderTaskRef.current = page.render({ canvasContext: context, viewport: viewport });
+                await renderTaskRef.current.promise;
+            } catch (e: any) { }
+        };
+        render();
+        return () => { active = false; if (renderTaskRef.current) renderTaskRef.current.cancel(); };
+    }, [pdfDoc, pageIndex, isActive]);
+
+    return <canvas ref={canvasRef} className="w-full h-auto shadow-sm block bg-white" />;
+});
+
+const ThumbnailImage: React.FC<{ 
+    handle: FileHandle; 
+    isActive: boolean; 
+}> = React.memo(({ handle, isActive }) => {
+    const [src, setSrc] = useState<string | null>(null);
+    useEffect(() => {
+        if (!isActive) { if(src) { URL.revokeObjectURL(src); setSrc(null); } return; }
+        let active = true;
+        getFileUrl(handle).then(url => { if(active) setSrc(url); });
+        return () => { active = false; };
+    }, [handle, isActive]);
+
+    if (!src) return <div className="w-full aspect-[2/3] bg-white/5 animate-pulse rounded" />;
+    return <img src={src} alt="thumb" className="w-full h-auto shadow-sm block object-cover rounded" />;
+});
+
+const ThumbnailStrip: React.FC<{
+    book: Book;
+    pdfDoc: any;
+    totalPages: number;
+    currentPage: number;
+    onSelectPage: (idx: number) => void;
+}> = ({ book, pdfDoc, totalPages, currentPage, onSelectPage }) => {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const lastScrollTime = useRef(0);
+
+    useEffect(() => {
+        if (containerRef.current && Date.now() - lastScrollTime.current > 1000) {
+            const activeThumb = containerRef.current.querySelector(`[data-page="${currentPage}"]`);
+            if (activeThumb) {
+                activeThumb.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }
+    }, [currentPage]);
+
+    const [visibleRange, setVisibleRange] = useState({ start: 0, end: 15 });
+
+    const handleScroll = useCallback(() => {
+        if (!containerRef.current) return;
+        lastScrollTime.current = Date.now();
+        const el = containerRef.current;
+        const itemHeight = 100;
+        const start = Math.floor(el.scrollTop / itemHeight);
+        const count = Math.ceil(el.clientHeight / itemHeight);
+        setVisibleRange({ start: Math.max(0, start - 5), end: Math.min(totalPages, start + count + 5) });
+    }, [totalPages]);
+
+    useEffect(() => { handleScroll(); }, [handleScroll]);
+
+    return (
+        <div 
+            ref={containerRef}
+            onScroll={handleScroll}
+            className="h-full w-full overflow-y-auto overflow-x-hidden p-3 space-y-4 scrollbar-hide bg-black/60 backdrop-blur-md border-r border-white/10"
+        >
+            {Array.from({ length: totalPages }).map((_, idx) => {
+                const isVisible = idx >= visibleRange.start && idx <= visibleRange.end;
+                const isCurrent = idx === currentPage;
+
+                return (
+                    <div 
+                        key={idx} 
+                        data-page={idx}
+                        onClick={(e) => { 
+                            e.stopPropagation(); 
+                            onSelectPage(idx); 
+                        }}
+                        className={`w-full cursor-pointer transition-all duration-200 relative group flex flex-col items-center gap-1 ${isCurrent ? 'opacity-100 scale-100 ring-2 ring-[var(--accent)] rounded' : 'opacity-40 hover:opacity-100 hover:scale-105'}`}
+                        style={{ minHeight: '60px' }}
+                    >
+                        {isVisible ? (
+                            book.format === 'pdf' ? (
+                                <PdfThumbnail pdfDoc={pdfDoc} pageIndex={idx + 1} isActive={true} />
+                            ) : (
+                                <ThumbnailImage handle={book.pages[idx].handle} isActive={true} />
+                            )
+                        ) : (
+                             <div className="w-full aspect-[2/3] bg-white/5 rounded" />
+                        )}
+                    </div>
+                );
+            })}
+        </div>
+    );
+};
+
+// --- Reader View Main ---
+
+const PdfPage: React.FC<{ pdfDoc: any; pageIndex: number; scale: number; isActive: boolean; className?: string }> = React.memo(({ pdfDoc, pageIndex, scale, isActive, className }) => {
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const renderTaskRef = useRef<any>(null);
     useEffect(() => {
         if (!isActive || !pdfDoc || !canvasRef.current) return;
         let active = true;
@@ -51,92 +162,62 @@ const PdfPage: React.FC<{
                 if (renderTaskRef.current) renderTaskRef.current.cancel();
                 renderTaskRef.current = page.render({ canvasContext: context, viewport: viewport });
                 await renderTaskRef.current.promise;
-                if (active && onRenderSuccess) onRenderSuccess();
-            } catch (e: any) {
-                if (e.name !== 'RenderingCancelledException') setError(true);
-            }
+            } catch (e: any) { }
         };
         render();
         return () => { active = false; if (renderTaskRef.current) renderTaskRef.current.cancel(); };
-    }, [pdfDoc, pageIndex, scale, isActive, onRenderSuccess]);
-
-    if (error) return <div className="p-8 text-red-500"><AlertTriangle /></div>;
+    }, [pdfDoc, pageIndex, scale, isActive]);
     return <canvas ref={canvasRef} className={`bg-white shadow-sm ${className}`} />;
 });
 
-// --- Image Page Component ---
-const LazyImagePage: React.FC<{ 
-    handle: FileHandle; 
-    isActive: boolean; 
-    alt: string; 
-    className?: string; 
-    style?: React.CSSProperties;
-    onLoad?: (src: string) => void;
-}> = React.memo(({ handle, isActive, alt, className, style, onLoad }) => {
+const LazyImagePage: React.FC<{ handle: FileHandle; isActive: boolean; alt: string; className?: string; style?: React.CSSProperties }> = React.memo(({ handle, isActive, alt, className, style }) => {
     const [src, setSrc] = useState<string | null>(null);
     useEffect(() => {
         if (!isActive) { if(src) { URL.revokeObjectURL(src); setSrc(null); } return; }
         let active = true;
-        getFileUrl(handle).then(url => { 
-            if(active) {
-                setSrc(url);
-                if (onLoad) onLoad(url);
-            }
-        });
+        getFileUrl(handle).then(url => { if(active) setSrc(url); });
         return () => { active = false; };
     }, [handle, isActive]);
-
     if (!src) return <div className="w-full h-[60vh] flex items-center justify-center text-[var(--text-muted)]"><div className="w-8 h-8 rounded-full border-2 border-t-[var(--accent)] animate-spin"/></div>;
     return <img src={src} alt={alt} className={className} style={style} />;
 });
 
-export const ReaderView: React.FC<ReaderViewProps> = ({ book, onClose, onUpdateProgress }) => {
-  // --- Configuration State ---
-  const [settings, setSettings] = useState<ReaderSettings>({ 
-      direction: 'LTR', fitMode: 'contain', viewMode: 'vertical', slideshowInterval: 3, zenMode: false, smartSplit: false 
-  });
-  
-  // --- Navigation State ---
+export const ReaderView: React.FC<ReaderViewProps> = ({ book, onClose, onUpdateProgress, settings }) => {
   const [currentPage, setCurrentPage] = useState(() => book.readingProgress?.currentPageIndex || 0);
-  const [bookmarks, setBookmarks] = useState<Set<number>>(new Set());
   const [pdfDoc, setPdfDoc] = useState<any>(null);
   const [pdfPages, setPdfPages] = useState<number>(0);
   const isPdf = book.format === 'pdf';
   const totalPages = isPdf ? pdfPages : book.pages.length;
-
-  // --- UI State ---
-  const [showControls, setShowControls] = useState(true);
-  const [showSettingsPanel, setShowSettingsPanel] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isSlideshowActive, setIsSlideshowActive] = useState(false);
-  const [currentImageSrc, setCurrentImageSrc] = useState<string | null>(null);
+  const [isBookmarked, setIsBookmarked] = useState(false);
   
-  // --- High Performance Transform State (Direct DOM) ---
   const transform = useRef({ scale: 1, panX: 0, panY: 0 });
   const contentRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const isDragging = useRef(false);
-  const dragStart = useRef({ x: 0, y: 0 });
-  
-  // Sync React State for UI controls
   const [scaleDisplay, setScaleDisplay] = useState(1);
+  const [isClosing, setIsClosing] = useState(false);
   
-  // Gesture Accumulators
-  const wheelAccumulator = useRef(0);
-  const wheelTimeout = useRef<number | null>(null);
+  const [isFlipping, setIsFlipping] = useState(false);
+  const [flipPhase, setFlipPhase] = useState<'out' | 'in-start' | 'in-end' | 'idle'>('idle');
+  const [flipDirection, setFlipDirection] = useState<'next' | 'prev'>('next');
+  const [showStamp, setShowStamp] = useState(false);
 
-  // --- Initialization ---
+  // Digital Patina: Increase read count on mount
   useEffect(() => {
-      dbGetReaderSettings().then(setSettings);
-      dbGetBookmarksForBook(book.id).then(indices => setBookmarks(new Set(indices)));
-  }, [book.id]);
+     const inc = async () => {
+         // Simple atomic increment is complex with current DB, so just optimistic update
+         const current = book.readCount || 0;
+         await dbUpdateBook({ ...book, readCount: current + 1, handle: undefined, pages: undefined, coverHandle: undefined } as any);
+     };
+     inc();
+  }, []);
 
   useEffect(() => {
-      if (totalPages > 0) {
-          const t = setTimeout(() => onUpdateProgress(book.id, currentPage, totalPages), 500);
-          return () => clearTimeout(t);
-      }
-  }, [currentPage, book.id, totalPages]);
+      const checkBookmark = async () => {
+         const marks = await dbGetBookmarksForBook(book.id);
+         setIsBookmarked(marks.includes(currentPage));
+      };
+      checkBookmark();
+  }, [book.id, currentPage]);
 
   useEffect(() => {
       if (!isPdf) return;
@@ -151,13 +232,34 @@ export const ReaderView: React.FC<ReaderViewProps> = ({ book, onClose, onUpdateP
       })();
   }, [book.id, isPdf]);
 
-  const updateSetting = (key: keyof ReaderSettings, value: any) => {
-      const newSettings = { ...settings, [key]: value };
-      setSettings(newSettings);
-      dbSaveReaderSettings(newSettings);
+  useEffect(() => {
+      if (totalPages > 0) {
+          const t = setTimeout(() => onUpdateProgress(book.id, currentPage, totalPages), 500);
+          return () => clearTimeout(t);
+      }
+      
+      // Completionist Stamp Trigger
+      if (totalPages > 0 && currentPage === totalPages - 1 && !showStamp) {
+          setTimeout(() => {
+              playThumpSfx();
+              setShowStamp(true);
+          }, 800);
+      } else if (currentPage !== totalPages - 1) {
+          setShowStamp(false);
+      }
+  }, [currentPage, book.id, totalPages]);
+
+  const toggleBookmark = async () => {
+      if (isBookmarked) {
+          await dbRemoveBookmark(book.id, currentPage);
+          setIsBookmarked(false);
+      } else {
+          await dbAddBookmark(book.id, currentPage);
+          setIsBookmarked(true);
+      }
+      if(settings.enableSfx) playClickSfx();
   };
 
-  // --- Reset Transforms Helper ---
   const resetTransform = useCallback(() => {
       transform.current = { scale: 1, panX: 0, panY: 0 };
       if (contentRef.current) {
@@ -166,26 +268,48 @@ export const ReaderView: React.FC<ReaderViewProps> = ({ book, onClose, onUpdateP
       setScaleDisplay(1);
   }, []);
 
-  // --- Navigation Engine ---
   const navigate = useCallback((direction: 'next' | 'prev') => {
-      if (settings.viewMode === 'vertical') return; // Scroll logic handles vertical
+      if (settings.viewMode === 'vertical') return;
       
+      const isSpread = settings.viewMode === 'spread';
       let delta = settings.direction === 'LTR' ? 1 : -1;
       if (direction === 'prev') delta *= -1;
+      
+      if (isSpread) {
+         if (direction === 'next') delta = (currentPage === 0) ? 1 : (delta * 2); 
+         else delta = (currentPage === 1) ? -1 : (delta * 2);
+      }
 
       const next = currentPage + delta;
+      
       if (next >= 0 && next < totalPages) {
-          setCurrentPage(next);
-          resetTransform(); // Reset Zoom on page turn
-      } else if (isSlideshowActive) {
-          setIsSlideshowActive(false);
+          if (settings.enableSfx) playPageTurnSfx();
+          
+          setFlipDirection(direction);
+          setIsFlipping(true);
+          setFlipPhase('out');
+          
+          setTimeout(() => {
+              setCurrentPage(next);
+              setFlipPhase('in-start');
+              resetTransform();
+              
+              requestAnimationFrame(() => {
+                  requestAnimationFrame(() => {
+                      setFlipPhase('in-end');
+                      setTimeout(() => { 
+                          setFlipPhase('idle'); 
+                          setIsFlipping(false); 
+                      }, 400);
+                  });
+              });
+          }, 400); 
       } else if (direction === 'prev' && next < 0) {
-          // Explicit "Previous" at start of book closes it (Mobile UX)
-          onClose();
+          setIsClosing(true);
+          setTimeout(onClose, 300);
       }
-  }, [currentPage, totalPages, settings.direction, settings.viewMode, isSlideshowActive, resetTransform, onClose]);
+  }, [currentPage, totalPages, settings, resetTransform, onClose]);
 
-  // --- Direct DOM Transform Updater ---
   const updateContentTransform = () => {
       if (contentRef.current) {
           const { panX, panY, scale } = transform.current;
@@ -193,192 +317,120 @@ export const ReaderView: React.FC<ReaderViewProps> = ({ book, onClose, onUpdateP
       }
   };
 
-  // --- Unified Gesture Engine ---
+  const handleDoubleTapZoom = (e: React.MouseEvent) => {
+      if (!contentRef.current) return;
+      
+      // If already zoomed, reset
+      if (transform.current.scale > 1) {
+          resetTransform();
+          return;
+      }
+
+      // Calculate Quadrant
+      const rect = contentRef.current.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      const width = rect.width;
+      const height = rect.height;
+      
+      // Target scale
+      const targetScale = 2.5;
+      
+      // Calculate pan to center the click
+      const centerX = rect.width / 2;
+      const centerY = rect.height / 2;
+      
+      // pan = (center - clickPos) * (scale - 1) ? No, simpler logic for "Smart Zoom"
+      // Just shift to the quadrant.
+      
+      let newPanX = 0;
+      let newPanY = 0;
+      
+      if (x < centerX) newPanX = width * 0.5; // Shift Right to see Left
+      else newPanX = -width * 0.5; // Shift Left to see Right
+      
+      if (y < centerY) newPanY = height * 0.5;
+      else newPanY = -height * 0.5;
+
+      // Refined Logic: Pan so the clicked point is centered
+      // newPan = (ContainerCenter - ClickedPoint) * Scale
+      // But we are transforming the element itself.
+      
+      // Simply move the clicked quadrant to view
+      newPanX = (centerX - x) * targetScale;
+      newPanY = (centerY - y) * targetScale;
+
+      // Clamp
+      const maxPanX = (width * targetScale - width) / 2;
+      const maxPanY = (height * targetScale - height) / 2;
+      
+      newPanX = Math.max(-maxPanX, Math.min(maxPanX, newPanX));
+      newPanY = Math.max(-maxPanY, Math.min(maxPanY, newPanY));
+
+      transform.current = { scale: targetScale, panX: newPanX, panY: newPanY };
+      updateContentTransform();
+      setScaleDisplay(targetScale);
+  };
+
   const handleWheel = (e: React.WheelEvent) => {
       const { scale } = transform.current;
-
-      // 1. Zooming (Ctrl+Wheel or Pinch)
       if (e.ctrlKey) {
           e.preventDefault();
-          const zoomSensitivity = 0.005; // Finer zoom
-          const delta = -e.deltaY * zoomSensitivity;
-          
-          let newScale = scale + delta;
-          
-          // Snap to 100% if close
-          if (Math.abs(newScale - 1) < 0.05) newScale = 1;
-
-          // Allow zooming out to 25% and up to 500%
-          newScale = Math.min(Math.max(0.25, newScale), 5);
-
-          transform.current.scale = newScale;
-          
-          // Reset pan if zoomed out or exactly 100% (auto-center)
-          if (newScale <= 1) {
-              transform.current.panX = 0;
-              transform.current.panY = 0;
+          const delta = -e.deltaY * 0.005;
+          let newScale = Math.min(Math.max(0.1, scale + delta), 5);
+          if (newScale < 0.6) {
+              setIsClosing(true);
+              setTimeout(onClose, 300);
+              return;
           }
-          
+          if (Math.abs(newScale - 1) < 0.05) newScale = 1;
+          transform.current.scale = newScale;
+          if (newScale <= 1) { transform.current.panX = 0; transform.current.panY = 0; }
           updateContentTransform();
           setScaleDisplay(newScale);
           return;
       }
-
-      // 2. Panning (When zoomed in)
       if (scale > 1) {
           e.preventDefault();
-          // Direct DOM panning (60fps)
           transform.current.panX -= e.deltaX;
           transform.current.panY -= e.deltaY;
           updateContentTransform();
           return;
       }
-
-      // 3. Native Vertical Scroll (Vertical Mode @ 1x or less)
-      if (settings.viewMode === 'vertical') {
-          return; // Allow native scroll
-      }
-
-      // 4. Page Turning (Single Mode @ 1x or less) - Horizontal Swipe
-      // Swipe Logic: Accumulate deltas to detect intention
-      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
-          e.preventDefault(); // Stop Browser Back gesture
-          
-          wheelAccumulator.current += e.deltaX;
-
-          if (wheelTimeout.current) clearTimeout(wheelTimeout.current);
-          wheelTimeout.current = window.setTimeout(() => {
-              wheelAccumulator.current = 0;
-          }, 150);
-
-          const THRESHOLD = 50; // Swipe sensitivity
-
-          if (wheelAccumulator.current > THRESHOLD) {
-              // Scrolled Right -> Next Page (LTR)
-              settings.direction === 'LTR' ? navigate('next') : navigate('prev');
-              wheelAccumulator.current = 0; // Reset
-          } else if (wheelAccumulator.current < -THRESHOLD) {
-              // Scrolled Left -> Prev Page (LTR)
-              settings.direction === 'LTR' ? navigate('prev') : navigate('next');
-              wheelAccumulator.current = 0;
-          }
-      }
-  };
-
-  const handleMouseDown = (e: React.MouseEvent) => {
-      if (transform.current.scale > 1) {
-          isDragging.current = true;
-          dragStart.current = { 
-              x: e.clientX - transform.current.panX, 
-              y: e.clientY - transform.current.panY 
-          };
-          e.preventDefault();
-          if (contentRef.current) contentRef.current.style.cursor = 'grabbing';
-      }
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-      if (isDragging.current && transform.current.scale > 1) {
-          e.preventDefault();
-          transform.current.panX = e.clientX - dragStart.current.x;
-          transform.current.panY = e.clientY - dragStart.current.y;
-          updateContentTransform();
-      }
-  };
-
-  const handleMouseUp = () => {
-      isDragging.current = false;
-      if (contentRef.current) {
-          contentRef.current.style.cursor = transform.current.scale > 1 ? 'grab' : 'default';
+      if (settings.viewMode !== 'vertical' && Math.abs(e.deltaX) > 50) {
+          if (e.deltaX > 0) settings.direction === 'LTR' ? navigate('next') : navigate('prev');
+          else settings.direction === 'LTR' ? navigate('prev') : navigate('next');
       }
   };
 
   const handleClick = (e: React.MouseEvent) => {
-      if (isDragging.current) return;
       if (transform.current.scale > 1) return;
+      if ((e.target as HTMLElement).closest('.thumbnail-sidebar')) return;
+      if ((e.target as HTMLElement).closest('button')) return;
 
       const w = window.innerWidth;
-      // Center zone toggles controls
-      if (e.clientX > w * 0.3 && e.clientX < w * 0.7) {
-          setShowControls(prev => !prev);
-      } else if (settings.viewMode === 'single') {
-          if (e.clientX < w * 0.3) settings.direction === 'LTR' ? navigate('prev') : navigate('next');
-          if (e.clientX > w * 0.7) settings.direction === 'LTR' ? navigate('next') : navigate('prev');
-      }
+      if (e.clientX < w * 0.3) settings.direction === 'LTR' ? navigate('prev') : navigate('next');
+      if (e.clientX > w * 0.7) settings.direction === 'LTR' ? navigate('next') : navigate('prev');
   };
 
-  // --- Touch Gestures (Swipe to Close) ---
-  const touchStart = useRef<{x: number, y: number} | null>(null);
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-      if (e.touches.length === 1) {
-          touchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-      }
-  };
-
-  const handleTouchEnd = (e: React.TouchEvent) => {
-      if (!touchStart.current || transform.current.scale > 1) return;
-      
-      const touchEnd = { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
-      const deltaX = touchEnd.x - touchStart.current.x;
-      const deltaY = touchEnd.y - touchStart.current.y;
-
-      // Detect Edge Swipe (Swipe Right from Left Edge)
-      const isEdgeSwipe = touchStart.current.x < 50 && deltaX > 80 && Math.abs(deltaY) < 60;
-      
-      if (isEdgeSwipe) {
-          onClose();
-      }
-      
-      touchStart.current = null;
-  };
-
-  // --- Keyboard ---
   useEffect(() => {
-      const handleKey = (e: KeyboardEvent) => {
-          if (e.key === 'Escape') onClose();
-          if (e.key === 'ArrowRight') settings.direction === 'LTR' ? navigate('next') : navigate('prev');
-          if (e.key === 'ArrowLeft') settings.direction === 'LTR' ? navigate('prev') : navigate('next');
-          if (e.key === ' ') { e.preventDefault(); navigate('next'); }
-          if (e.key === 'f') toggleFullscreen();
-          if (e.key === '0') resetTransform();
-      };
-      window.addEventListener('keydown', handleKey);
-      return () => window.removeEventListener('keydown', handleKey);
-  }, [navigate, onClose, settings, resetTransform]);
-
-  const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-        containerRef.current?.requestFullscreen().catch(console.error);
-        setIsFullscreen(true);
-    } else {
-        document.exitFullscreen();
-        setIsFullscreen(false);
-    }
-  };
-
-  // --- Slideshow ---
-  useEffect(() => {
-      if (!isSlideshowActive) return;
-      setShowControls(false);
-      const interval = setInterval(() => navigate('next'), settings.slideshowInterval * 1000);
-      return () => clearInterval(interval);
-  }, [isSlideshowActive, navigate, settings.slideshowInterval]);
-
-  // --- Scroll Sync (Vertical) ---
-  const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
-  useLayoutEffect(() => {
-      // If switching to vertical mode or loading, scroll to current page
-      if (settings.viewMode === 'vertical' && transform.current.scale === 1 && pageRefs.current[currentPage]) {
-          pageRefs.current[currentPage]?.scrollIntoView({ block: 'start' });
-      }
-  }, [settings.viewMode, currentPage]); // Intentionally not dependent on 'scale' to avoid jumping when zooming
+      if (settings.viewMode !== 'vertical') return;
+      const observer = new IntersectionObserver((entries) => {
+          entries.forEach(entry => {
+              if (entry.isIntersecting) {
+                  const index = parseInt(entry.target.getAttribute('data-index') || '0');
+                  setCurrentPage(index); 
+              }
+          });
+      }, { rootMargin: '200% 0px 200% 0px' }); 
+      const elements = document.querySelectorAll('.page-container');
+      elements.forEach(el => observer.observe(el));
+      return () => observer.disconnect();
+  }, [settings.viewMode, totalPages, book.id]); 
 
   const getImageStyle = (): React.CSSProperties => {
-      // We don't use React style for transform anymore to improve performance.
-      // We only use this for basic fit sizing.
       const style: React.CSSProperties = {};
-      
       switch (settings.fitMode) {
           case 'width': style.width = '100vw'; style.height = 'auto'; style.maxWidth = 'none'; break;
           case 'height': style.height = '100vh'; style.width = 'auto'; style.maxWidth = 'none'; break;
@@ -388,228 +440,129 @@ export const ReaderView: React.FC<ReaderViewProps> = ({ book, onClose, onUpdateP
       return style;
   };
 
-  const toggleBookmark = async (idx = currentPage) => {
-      if (bookmarks.has(idx)) {
-          await dbRemoveBookmark(book.id, idx);
-          setBookmarks(prev => { const n = new Set(prev); n.delete(idx); return n; });
-      } else {
-          await dbAddBookmark(book.id, idx);
-          setBookmarks(prev => new Set(prev).add(idx));
+  const renderContent = (idx: number, active: boolean) => {
+      if (idx >= totalPages) return <div className="w-full h-full bg-transparent" />;
+      return (
+          <div className="w-full h-full flex items-center justify-center backface-hidden">
+              {isPdf ? (
+                  <PdfPage pdfDoc={pdfDoc} pageIndex={idx + 1} scale={2} isActive={active} className="shadow-2xl max-h-screen max-w-full object-contain" />
+              ) : (
+                  <LazyImagePage handle={book.pages[idx].handle} isActive={active} alt={`Page ${idx}`} style={getImageStyle()} />
+              )}
+          </div>
+      );
+  };
+
+  const getFlipClass = () => {
+      if (!isFlipping) return '';
+      if (settings.transitionMode === 'datamosh') {
+          return 'datamosh-active';
       }
+      return flipPhase === 'out' ? 'flip-out' : flipPhase === 'in-start' ? 'flip-in-start' : 'flip-in-end';
   };
 
   return (
     <div 
       ref={containerRef}
-      className={`fixed inset-0 z-50 bg-[var(--bg-main)] flex flex-col text-[var(--text-main)] select-none overflow-hidden`}
+      className={`fixed inset-0 z-50 bg-[var(--bg-main)] flex flex-col text-[var(--text-main)] select-none overflow-hidden transition-all duration-300 ${isClosing ? 'opacity-0 scale-95' : 'opacity-100 scale-100'}`}
       onWheel={handleWheel}
-      onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp}
-      onTouchStart={handleTouchStart}
-      onTouchEnd={handleTouchEnd}
+      onClick={handleClick}
     >
-      
-      {/* Zen Mode Ambient Background */}
-      {settings.zenMode && currentImageSrc && (
-          <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none opacity-50 transition-opacity duration-1000">
-              <img 
-                  src={currentImageSrc} 
-                  alt="" 
-                  className="w-full h-full object-cover blur-3xl scale-125 opacity-40 brightness-75" 
-              />
-              <div className="absolute inset-0 bg-black/40" />
-          </div>
-      )}
-
       {/* Top Controls */}
-      <div className={`absolute top-0 left-0 right-0 h-16 bg-gradient-to-b from-black/80 to-transparent flex items-center justify-between px-6 z-30 transition-all duration-300 ${showControls ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-full pointer-events-none'}`}>
-        <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full text-white/90 backdrop-blur-md border border-white/5">
-            <ArrowLeft className="w-5 h-5" />
-        </button>
-        
-        <div className="flex items-center gap-3">
-             <button onClick={() => toggleBookmark(currentPage)} className={`p-2 rounded-full backdrop-blur-md border transition-all ${bookmarks.has(currentPage) ? 'bg-[var(--accent)] text-white border-[var(--accent)]' : 'hover:bg-white/10 text-white/90 border-white/10'}`}>
-                 <Heart className={`w-5 h-5 ${bookmarks.has(currentPage) ? 'fill-current' : ''}`} />
-             </button>
-             
-             <button onClick={() => setIsSlideshowActive(!isSlideshowActive)} className={`p-2 rounded-full backdrop-blur-md border transition-all ${isSlideshowActive ? 'bg-[var(--accent)] text-white border-[var(--accent)]' : 'hover:bg-white/10 text-white/90 border-white/10'}`}>
-                {isSlideshowActive ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current" />}
+      <div className={`absolute top-0 left-0 right-0 h-16 bg-gradient-to-b from-black/80 to-transparent flex items-center justify-between px-6 z-30 opacity-0 hover:opacity-100 transition-opacity duration-300 pointer-events-none hover:pointer-events-auto`}>
+        <div className="flex gap-4">
+            <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full text-white/90 backdrop-blur-md border border-white/5 pointer-events-auto">
+                <ArrowLeft className="w-5 h-5" />
             </button>
-
-             <button onClick={toggleFullscreen} className="p-2 rounded-full hover:bg-white/10 text-white/90 backdrop-blur-md border border-white/10">
-                {isFullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
-             </button>
-
-             <button onClick={() => setShowSettingsPanel(!showSettingsPanel)} className={`p-2 rounded-full backdrop-blur-md border transition-all ${showSettingsPanel ? 'bg-white text-black border-white' : 'hover:bg-white/10 text-white/90 border-white/10'}`}>
-                <Settings2 className="w-5 h-5" />
-             </button>
+            <button onClick={toggleBookmark} className={`p-2 hover:bg-white/10 rounded-full backdrop-blur-md border border-white/5 pointer-events-auto transition-colors ${isBookmarked ? 'text-[var(--accent)]' : 'text-white/90'}`}>
+                <BookmarkIcon className={`w-5 h-5 ${isBookmarked ? 'fill-current' : ''}`} />
+            </button>
+        </div>
+        
+        <div className="bg-black/40 backdrop-blur px-3 py-1 rounded-full text-xs font-mono border border-white/10">
+            {currentPage + 1} / {totalPages}
         </div>
       </div>
 
-      {/* Settings Panel */}
-      {showSettingsPanel && (
-          <div className="absolute top-20 right-6 z-40 w-72 bg-[var(--bg-card)]/95 backdrop-blur-xl border border-[var(--border-color)] rounded-2xl shadow-2xl p-5 animate-in fade-in zoom-in-95 duration-200 overflow-y-auto max-h-[80vh]">
-              <div className="space-y-6">
-                  {/* Mode & Zen */}
-                  <div className="space-y-2">
-                       <label className="text-[10px] uppercase tracking-widest text-[var(--text-muted)] font-bold">Experience</label>
-                       <div className="grid grid-cols-2 gap-2">
-                            <button onClick={() => updateSetting('viewMode', 'single')} className={`p-2 rounded border text-xs ${settings.viewMode==='single' ? 'bg-[var(--accent)] text-white border-transparent' : 'border-[var(--border-color)]'}`}>Single</button>
-                            <button onClick={() => updateSetting('viewMode', 'vertical')} className={`p-2 rounded border text-xs ${settings.viewMode==='vertical' ? 'bg-[var(--accent)] text-white border-transparent' : 'border-[var(--border-color)]'}`}>Scroll</button>
-                       </div>
-                       <button onClick={() => updateSetting('zenMode', !settings.zenMode)} className={`w-full flex items-center justify-between p-2 rounded border text-xs transition-colors ${settings.zenMode ? 'bg-purple-900/50 border-purple-500 text-purple-100' : 'border-[var(--border-color)]'}`}>
-                           <span className="flex items-center gap-2"><Sparkles className="w-4 h-4" /> Zen Mode</span>
-                           <span className="text-[10px] uppercase">{settings.zenMode ? 'ON' : 'OFF'}</span>
-                       </button>
-                  </div>
-                  {/* Single View Settings */}
-                  {settings.viewMode === 'single' && (
-                      <>
-                        <div className="space-y-2">
-                            <label className="text-[10px] uppercase tracking-widest text-[var(--text-muted)] font-bold">Direction</label>
-                            <div className="grid grid-cols-2 gap-2">
-                                <button onClick={() => updateSetting('direction', 'LTR')} className={`p-2 rounded border text-xs ${settings.direction==='LTR' ? 'bg-[var(--text-main)] text-[var(--bg-main)]' : 'border-[var(--border-color)]'}`}>LTR</button>
-                                <button onClick={() => updateSetting('direction', 'RTL')} className={`p-2 rounded border text-xs ${settings.direction==='RTL' ? 'bg-[var(--text-main)] text-[var(--bg-main)]' : 'border-[var(--border-color)]'}`}>Manga</button>
-                            </div>
-                        </div>
-                        <div className="space-y-2">
-                             <label className="text-[10px] uppercase tracking-widest text-[var(--text-muted)] font-bold">Fit</label>
-                             <div className="grid grid-cols-4 gap-1">
-                                {[{id:'contain',icon:<Minimize2 className="w-3"/>},{id:'width',icon:<AlignCenter className="w-3 rotate-90"/>},{id:'height',icon:<AlignCenter className="w-3"/>},{id:'original',icon:<Expand className="w-3"/>}].map(o => (
-                                    <button key={o.id} onClick={() => updateSetting('fitMode', o.id)} className={`p-2 flex justify-center rounded border ${settings.fitMode===o.id ? 'bg-[var(--text-main)] text-[var(--bg-main)]' : 'border-[var(--border-color)]'}`}>{o.icon}</button>
-                                ))}
-                             </div>
-                        </div>
-                      </>
-                  )}
-                  {/* Slideshow */}
-                  <div className="space-y-2">
-                      <div className="flex justify-between text-xs"><span>Slideshow</span><span>{settings.slideshowInterval}s</span></div>
-                      <input type="range" min="1" max="10" value={settings.slideshowInterval} onChange={(e) => updateSetting('slideshowInterval', Number(e.target.value))} className="w-full accent-[var(--accent)]" />
-                  </div>
-              </div>
-          </div>
-      )}
-
       {/* Main Viewport */}
-      <div 
-        className={`relative flex-1 w-full h-full overflow-hidden ${scaleDisplay > 1 ? 'cursor-grab' : ''}`}
-      >
+      <div className={`relative flex-1 w-full h-full overflow-hidden ${scaleDisplay > 1 ? 'cursor-grab' : ''}`}>
           
-          {/* 
-              Vertical Scroll Container 
-              - If scale == 1: Native scrolling enabled (overflow-y-auto).
-              - If scale > 1: Native scrolling disabled, manual panning via CSS transform.
-          */}
           {settings.viewMode === 'vertical' ? (
-              <div 
-                 className={`w-full h-full scroll-smooth ${scaleDisplay > 1 ? 'overflow-hidden' : 'overflow-y-auto overflow-x-hidden'}`}
-                 onClick={(e) => { if(scaleDisplay===1) handleClick(e); }}
-              >
-                  {/* The Transform Layer */}
-                  <div 
-                    ref={contentRef}
-                    className="flex flex-col items-center min-h-full py-20 origin-top-center will-change-transform"
-                    style={{
-                        transformOrigin: 'top center'
-                    }}
-                  >
-                      {Array.from({ length: totalPages }).map((_, idx) => (
-                          <div key={idx} ref={el => { pageRefs.current[idx] = el; }} className="relative mb-4 max-w-full">
-                               {/* Lazy Render Window */}
-                               {Math.abs(currentPage - idx) < 4 ? (
-                                    isPdf ? (
-                                        <PdfPage pdfDoc={pdfDoc} pageIndex={idx + 1} scale={1.5} isActive={true} className="shadow-lg" />
-                                    ) : (
-                                        <LazyImagePage 
-                                            handle={book.pages[idx].handle} 
-                                            isActive={true} 
-                                            alt={`Page ${idx}`} 
-                                            onLoad={(s) => { if(idx === currentPage) setCurrentImageSrc(s); }}
-                                            className="max-w-full h-auto shadow-md"
-                                        />
-                                    )
-                               ) : <div className="w-[100px] h-[800px]" />}
-                               
-                               {bookmarks.has(idx) && (
-                                   <div className="absolute top-2 right-2 p-2 bg-[var(--accent)] text-white rounded-full shadow-lg">
-                                       <Heart className="w-4 h-4 fill-current" />
-                                   </div>
-                               )}
-                          </div>
-                      ))}
-                  </div>
+              <div className="w-full h-full overflow-y-auto">
+                 {Array.from({ length: totalPages }).map((_, idx) => (
+                    <div key={idx} data-index={idx} className="page-container flex justify-center mb-8 min-h-[50vh]">
+                       {Math.abs(currentPage - idx) < 5 && renderContent(idx, true)}
+                    </div>
+                 ))}
+                 
+                 {/* Hanko Stamp for Vertical Mode */}
+                 {showStamp && (
+                    <div className="flex justify-center pb-24">
+                        <div className="hanko-seal w-48 h-48 rounded-full border-4 border-red-800 flex flex-col items-center justify-center text-red-800 rotate-[-15deg] backdrop-blur-sm bg-red-50/10">
+                             <span className="text-4xl font-serif font-bold">READ</span>
+                             <span className="text-sm font-mono mt-2">{new Date().toLocaleDateString()}</span>
+                        </div>
+                    </div>
+                 )}
               </div>
           ) : (
-              // Single View
-              <div 
-                  className="w-full h-full flex items-center justify-center"
-                  onClick={handleClick}
-              >
+              <div className="w-full h-full flex items-center justify-center perspective-2000" onDoubleClick={handleDoubleTapZoom}>
                   <div
                      ref={contentRef}
-                     className="will-change-transform flex items-center justify-center w-full h-full"
-                     style={{
-                         transformOrigin: 'center center',
-                     }}
+                     className={`relative w-full h-full flex items-center justify-center flip-container ${getFlipClass()}`}
                   >
-                      {isPdf ? (
-                          <PdfPage pdfDoc={pdfDoc} pageIndex={currentPage + 1} scale={2} isActive={true} className="shadow-2xl max-h-screen max-w-full object-contain" />
+                      {settings.viewMode === 'spread' && currentPage > 0 && currentPage < totalPages ? (
+                          <div className="flex w-full h-full items-center justify-center gap-1">
+                              {settings.direction === 'LTR' ? (
+                                  <>
+                                    <div className="flex-1 h-full flex justify-end">{renderContent(currentPage, true)}</div>
+                                    <div className="flex-1 h-full flex justify-start">{renderContent(currentPage + 1, true)}</div>
+                                  </>
+                              ) : (
+                                  <>
+                                    <div className="flex-1 h-full flex justify-end">{renderContent(currentPage + 1, true)}</div>
+                                    <div className="flex-1 h-full flex justify-start">{renderContent(currentPage, true)}</div>
+                                  </>
+                              )}
+                          </div>
                       ) : (
-                          <LazyImagePage 
-                              handle={book.pages[currentPage].handle}
-                              isActive={true}
-                              alt={`Page ${currentPage}`}
-                              onLoad={(s) => setCurrentImageSrc(s)}
-                              style={getImageStyle()}
-                          />
+                          <div className="absolute inset-0 flex items-center justify-center backface-hidden">
+                              {renderContent(currentPage, true)}
+                          </div>
                       )}
                   </div>
+                  
+                  {/* Hanko Stamp Overlay */}
+                  {showStamp && (
+                    <div className="absolute bottom-24 right-12 z-50 pointer-events-none">
+                        <div className="hanko-seal w-32 h-32 rounded-full border-4 border-red-800 flex flex-col items-center justify-center text-red-800">
+                             <span className="text-2xl font-serif font-bold">READ</span>
+                             <span className="text-xs font-mono mt-1">{new Date().toLocaleDateString()}</span>
+                        </div>
+                    </div>
+                  )}
               </div>
           )}
       </div>
 
-      {/* Bottom Scrubber (Redesigned) */}
-      <div className={`absolute bottom-0 left-0 right-0 px-6 py-8 z-30 transition-all duration-300 transform ${showControls ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0 pointer-events-none'}`}>
-         {/* Scrubber Container */}
-         <div className="relative group w-full max-w-3xl mx-auto">
-             
-             {/* Page Number Bubble (Floating above thumb) */}
-             <div className="absolute bottom-full left-0 right-0 mb-4 flex justify-center pointer-events-none">
-                 <span className="bg-black/60 backdrop-blur-md border border-white/10 text-white font-mono text-xs px-3 py-1 rounded-full shadow-lg">
-                    {currentPage + 1} / {totalPages}
-                 </span>
-             </div>
-
-             {/* The Track */}
-             <div className="relative h-12 flex items-center">
-                 <input 
-                    type="range" 
-                    min={0} 
-                    max={totalPages - 1} 
-                    value={currentPage}
-                    onChange={(e) => {
-                        const val = parseInt(e.target.value);
-                        setCurrentPage(val);
-                        if (settings.viewMode === 'vertical' && pageRefs.current[val]) {
-                            pageRefs.current[val]?.scrollIntoView();
-                        }
-                    }}
-                    className="w-full h-2 bg-white/20 rounded-full appearance-none cursor-pointer focus:outline-none 
-                        [&::-webkit-slider-thumb]:appearance-none 
-                        [&::-webkit-slider-thumb]:w-4 
-                        [&::-webkit-slider-thumb]:h-4 
-                        [&::-webkit-slider-thumb]:bg-white 
-                        [&::-webkit-slider-thumb]:rounded-full 
-                        [&::-webkit-slider-thumb]:shadow-[0_0_10px_rgba(255,255,255,0.5)]
-                        [&::-webkit-slider-thumb]:transition-transform
-                        hover:[&::-webkit-slider-thumb]:scale-125
-                        active:[&::-webkit-slider-thumb]:scale-150"
-                 />
-             </div>
-         </div>
+      {/* Thumbnail Filmstrip Scrubber */}
+      <div 
+        className="thumbnail-sidebar absolute top-0 bottom-0 left-0 w-[110px] -translate-x-full hover:translate-x-0 transition-transform duration-300 z-40 bg-transparent group"
+      >
+          <div className="absolute top-1/2 -right-6 w-6 h-24 -translate-y-1/2 flex items-center justify-center group-hover:opacity-0 transition-opacity cursor-pointer">
+              <div className="w-1.5 h-12 bg-[var(--text-muted)]/50 rounded-full" />
+          </div>
+          
+          <ThumbnailStrip 
+             book={book} 
+             pdfDoc={pdfDoc} 
+             totalPages={totalPages} 
+             currentPage={currentPage}
+             onSelectPage={(page) => {
+                 playClickSfx();
+                 setCurrentPage(page);
+             }}
+          />
       </div>
     </div>
   );

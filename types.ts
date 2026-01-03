@@ -1,3 +1,5 @@
+
+
 // --- File System Types ---
 export interface FileHandle extends FileSystemFileHandle {
   readonly kind: 'file';
@@ -40,6 +42,7 @@ export interface BookMetadata {
   // Timestamps
   addedAt: number;
   lastReadAt?: number;
+  readCount?: number; // Used for Digital Patina
   
   // Visuals
   coverImage?: Blob; // Cached optimized thumbnail
@@ -65,6 +68,13 @@ export interface Bookmark {
     createdAt: number;
 }
 
+export interface Playlist {
+    id: string;
+    name: string;
+    bookIds: string[];
+    createdAt: number;
+}
+
 // --- Runtime Types (App State) ---
 
 export interface Page {
@@ -73,12 +83,10 @@ export interface Page {
 }
 
 // A Book at runtime includes the handles needed to read it
-// It extends Metadata so we can pass it around easily
 export interface Book extends BookMetadata {
-  // Runtime handles (not persisted in 'items' store, but maybe in 'handles' store)
   coverHandle: FileHandle | null;
   pages: Page[]; 
-  handle: DirectoryHandle | FileHandle; // Supports both Folders and PDF Files
+  handle: DirectoryHandle | FileHandle; 
   readingProgress?: ReadingProgress;
 }
 
@@ -86,15 +94,16 @@ export interface Book extends BookMetadata {
 
 export type ViewState = 'WELCOME' | 'LIBRARY_LIST' | 'LIBRARY' | 'READER';
 
-export type Theme = 'sakura-night' | 'ivory-paper' | 'ink-blossom';
+export type Theme = 'sakura-night' | 'ivory-paper' | 'ink-blossom' | 'cyber-grid' | 'autumn-scroll' | 'nordic-frost';
 
-export type LibraryViewMode = 'category' | 'grid';
+// Added 'infinity' mode
+export type LibraryViewMode = 'category' | 'grid' | 'infinity';
 export type SortOption = 'title' | 'added' | 'recent';
 
 export interface AppState {
   view: ViewState;
   libraries: Library[];
-  libraryBooks: Book[]; // Books for the active library
+  libraryBooks: Book[]; 
   activeLibraryId: string | null;
   activeBookId: string | null;
   loading: boolean;
@@ -109,8 +118,14 @@ export type ImageFitMode = 'contain' | 'width' | 'height' | 'original';
 export interface ReaderSettings {
     direction: ReadingDirection;
     fitMode: ImageFitMode;
-    viewMode: 'single' | 'vertical';
+    viewMode: 'single' | 'vertical' | 'spread'; // Added 'spread'
     slideshowInterval: number; // seconds
-    zenMode: boolean; // Ambient background
-    smartSplit: boolean; // Split landscape images in two (for single view)
+    smartSplit: boolean; 
+    
+    // Visual/Audio Settings
+    enableSfx: boolean;
+    atmosphere: 'none' | 'rain' | 'vinyl';
+    lightingMode: 'ambient' | 'spotlight';
+    textureMode: 'none' | 'grain' | 'halftone' | 'fabric';
+    transitionMode: 'none' | 'slide' | 'flip' | 'datamosh';
 }

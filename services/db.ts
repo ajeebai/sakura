@@ -251,10 +251,14 @@ export const dbGetReaderSettings = async (): Promise<ReaderSettings> => {
     const defaults: ReaderSettings = {
         direction: 'LTR',
         fitMode: 'contain',
-        viewMode: 'vertical', // DEFAULT TO VERTICAL SCROLL
+        viewMode: 'vertical', 
         slideshowInterval: 3,
-        zenMode: false,
-        smartSplit: false
+        smartSplit: false,
+        enableSfx: true,
+        atmosphere: 'none',
+        lightingMode: 'ambient',
+        textureMode: 'grain',
+        transitionMode: 'slide'
     };
     return setting ? { ...defaults, ...setting.value } : defaults;
 };

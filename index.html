@@ -2,87 +2,244 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Sakura</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Premium Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,400&family=Inter:wght@200;300;400;500&family=JetBrains+Mono:wght@300&family=Noto+Serif+JP:wght@700&display=swap" rel="stylesheet">
+
     <style>
-      /* IMMERSIVE SCROLLBAR */
-      /* Chrome, Safari, Edge */
-      ::-webkit-scrollbar {
-        width: 0px;
-        height: 0px; /* Hide horizontal scrollbars too */
-        background: transparent;
-      }
+      /* --- GLOBAL TEXTURES --- */
       
-      /* Firefox */
-      * {
-        scrollbar-width: none;
+      .texture-grain {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 9999;
+        opacity: 0.05;
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+        mix-blend-mode: overlay;
+        display: none;
       }
+      body[data-texture="grain"] .texture-grain { display: block; opacity: 0.08; }
+      body[data-texture="fabric"] .texture-grain { display: block; opacity: 0.15; filter: contrast(200%); }
+
+      .texture-halftone {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 9998;
+        background: radial-gradient(circle, #000 2px, transparent 2.5px);
+        background-size: 8px 8px;
+        opacity: 0.03;
+        display: none;
+      }
+      body[data-texture="halftone"] .texture-halftone { display: block; }
+      
+      .spotlight-mask {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 9997;
+        background: radial-gradient(circle at var(--cursor-x, 50%) var(--cursor-y, 50%), transparent 150px, rgba(0,0,0,0.92) 500px);
+        opacity: 0;
+        transition: opacity 0.5s ease;
+      }
+      body[data-lighting="spotlight"] .spotlight-mask { opacity: 1; }
+
+      /* --- SCROLLBARS --- */
+      ::-webkit-scrollbar { width: 0px; height: 0px; background: transparent; }
+      * { scrollbar-width: none; }
       
       body {
-        /* System Font Stack for Privacy & Performance */
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        font-family: 'Inter', -apple-system, sans-serif;
         background-color: var(--bg-main);
         color: var(--text-main);
-        transition: background-color 0.6s cubic-bezier(0.2, 0.8, 0.2, 1), color 0.6s ease;
-        overflow: hidden; /* AppShell handles scrolling */
+        transition: background-color 0.8s cubic-bezier(0.2, 0.8, 0.2, 1), color 0.8s ease;
+        overflow: hidden;
+        letter-spacing: -0.01em;
       }
       
       h1, h2, h3, h4, h5, h6, .serif {
-        font-family: Iowan Old Style, Apple Garamond, Baskerville, Times New Roman, Droid Serif, Times, Source Serif Pro, serif;
-      }
-
-      /* CINEMATIC EASING */
-      :root {
-        --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
-        --ease-in-out-soft: cubic-bezier(0.76, 0, 0.24, 1);
-        --ease-elastic: cubic-bezier(0.68, -0.6, 0.32, 1.6);
-        
-        /* THEME: Sakura Night (Deep, Warm, Charcoal) */
-        --bg-main: #191716; 
-        --bg-card: #23201f; 
-        --bg-overlay: rgba(25, 23, 22, 0.85);
-        --text-main: #e6e0dc; 
-        --text-muted: #8a8583; 
-        --border-color: #332f2d; 
-        --accent: #d15e69; 
-        --shadow-elevation: 0 20px 40px -10px rgba(0,0,0,0.6);
-      }
-
-      :root[data-theme="ivory-paper"] {
-        /* THEME: Ivory Paper (Gallery, Warm, Clean) */
-        --bg-main: #fcfbf9;
-        --bg-card: #ffffff;
-        --bg-overlay: rgba(252, 251, 249, 0.9);
-        --text-main: #383533;
-        --text-muted: #999491;
-        --border-color: #edebe8;
-        --accent: #d15e69;
-        --shadow-elevation: 0 20px 40px -10px rgba(189, 180, 172, 0.4);
-      }
-
-      :root[data-theme="ink-blossom"] {
-        /* THEME: Ink (High Contrast, Mono) */
-        --bg-main: #0a0a0a;
-        --bg-card: #141414;
-        --bg-overlay: rgba(10, 10, 10, 0.95);
-        --text-main: #ffffff;
-        --text-muted: #666666;
-        --border-color: #333333;
-        --accent: #ffffff;
-        --shadow-elevation: 0 10px 30px -10px rgba(255,255,255,0.1);
+        font-family: 'Cormorant Garamond', serif;
       }
       
-      .wall-shadow {
-        box-shadow: var(--shadow-elevation);
+      .mono {
+        font-family: 'JetBrains Mono', monospace;
       }
 
-      /* Horizontal Scroll Snap Utils */
-      .snap-x-mandatory {
-        scroll-snap-type: x mandatory;
+      /* --- THEMES (Applied via html[data-theme]) --- */
+      :root {
+        --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+        
+        /* THEME: Sakura Night (Deep Dark) */
+        --bg-main: #0a0a0a;       
+        --bg-card: #141414;       
+        --bg-overlay: rgba(10, 10, 10, 0.85);
+        --text-main: #e5e5e5;     
+        --text-muted: #737373;    
+        --border-color: #262626;  
+        --accent: #ffffff;        
+        --shadow-elevation: 0 30px 60px -12px rgba(0, 0, 0, 0.9);
       }
-      .snap-center {
-        scroll-snap-align: center;
+
+      html[data-theme="ivory-paper"] {
+        /* THEME: Ivory Paper (Warm Light) */
+        --bg-main: #f2efe9;       
+        --bg-card: #fdfbf7;       
+        --bg-overlay: rgba(242, 239, 233, 0.92);
+        --text-main: #2c2925;     
+        --text-muted: #8a847c;    
+        --border-color: #dcd6ce;
+        --accent: #d94e28;     
+        --shadow-elevation: 0 20px 40px -10px rgba(44, 41, 37, 0.08);
+      }
+
+      html[data-theme="ink-blossom"] {
+        /* THEME: Ink Blossom (High Contrast Monochrome) */
+        --bg-main: #ffffff;
+        --bg-card: #ffffff;
+        --bg-overlay: rgba(255, 255, 255, 0.98);
+        --text-main: #000000;
+        --text-muted: #666666;
+        --border-color: #000000;
+        --accent: #000000;        
+        --shadow-elevation: 8px 8px 0px rgba(0,0,0,1); 
+      }
+
+      html[data-theme="cyber-grid"] {
+        /* THEME: Cyber Grid (Neon) */
+        --bg-main: #050510;
+        --bg-card: #0a0a1f;
+        --bg-overlay: rgba(5, 5, 16, 0.85);
+        --text-main: #00f0ff;
+        --text-muted: #4d4d80;
+        --border-color: #1a1a40;
+        --accent: #ff003c;
+        --shadow-elevation: 0 0 20px rgba(0, 240, 255, 0.1);
+      }
+
+      html[data-theme="autumn-scroll"] {
+        /* THEME: Autumn Scroll (Earthy) */
+        --bg-main: #2d2420;
+        --bg-card: #3a302a;
+        --bg-overlay: rgba(45, 36, 32, 0.9);
+        --text-main: #e8dcc5;
+        --text-muted: #9c8c74;
+        --border-color: #594a42;
+        --accent: #d47e33;
+        --shadow-elevation: 0 20px 50px -10px rgba(0,0,0,0.5);
+      }
+
+      html[data-theme="nordic-frost"] {
+        /* THEME: Nordic Frost (Cool Blue/Grey) */
+        --bg-main: #eef2f5;
+        --bg-card: #ffffff;
+        --bg-overlay: rgba(238, 242, 245, 0.85);
+        --text-main: #2c3e50;
+        --text-muted: #95a5a6;
+        --border-color: #cbd5e1;
+        --accent: #3498db;
+        --shadow-elevation: 0 10px 30px -5px rgba(52, 152, 219, 0.15);
+      }
+      
+      .glass-panel {
+        background: var(--bg-overlay);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+      }
+      
+      /* 3D Transform Utilities */
+      .perspective-1000 { perspective: 1000px; }
+      .perspective-2000 { perspective: 2000px; }
+      .preserve-3d { transform-style: preserve-3d; }
+      .backface-hidden { backface-visibility: hidden; }
+      
+      /* Flip Animation Classes */
+      .flip-container {
+        transition: transform 0.4s ease-in;
+      }
+      .flip-out {
+        transform: rotateY(90deg);
+        opacity: 0.5;
+      }
+      .flip-in-start {
+        transform: rotateY(-90deg);
+        opacity: 0.5;
+        transition: none; /* Instant reset */
+      }
+      .flip-in-end {
+        transform: rotateY(0deg);
+        opacity: 1;
+        transition: transform 0.4s ease-out, opacity 1; 
+      }
+
+      /* Datamosh / Glitch Effect */
+      @keyframes glitch-skew {
+        0% { transform: skew(0deg); }
+        20% { transform: skew(-2deg); }
+        40% { transform: skew(2deg); }
+        60% { transform: skew(-1deg); }
+        80% { transform: skew(1deg); }
+        100% { transform: skew(0deg); }
+      }
+      .datamosh-active {
+        animation: glitch-skew 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94) both infinite;
+        filter: contrast(150%) brightness(110%);
+      }
+      .datamosh-active::before, .datamosh-active::after {
+        content: "";
+        position: absolute;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: inherit;
+        pointer-events: none;
+      }
+      .datamosh-active::before {
+        transform: translate(2px, 0);
+        mix-blend-mode: color-dodge;
+        clip-path: polygon(0 0, 100% 0, 100% 45%, 0 45%);
+      }
+      .datamosh-active::after {
+        transform: translate(-2px, 0);
+        mix-blend-mode: exclusion;
+        clip-path: polygon(0 55%, 100% 55%, 100% 100%, 0 100%);
+      }
+
+      /* Hanko Stamp Animation */
+      @keyframes stamp-slam {
+        0% { transform: scale(3) rotate(15deg); opacity: 0; }
+        50% { transform: scale(0.9) rotate(-5deg); opacity: 1; }
+        70% { transform: scale(1.1) rotate(-5deg); }
+        100% { transform: scale(1) rotate(-5deg); opacity: 0.8; }
+      }
+      .hanko-seal {
+        animation: stamp-slam 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        font-family: 'Noto Serif JP', serif;
+        mix-blend-mode: multiply;
+        border: 4px solid #d00;
+        color: #d00;
+        mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.5' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.5'/%3E%3C/svg%3E");
+      }
+      
+      /* Digital Patina - Creases */
+      .patina-crease {
+        background: linear-gradient(135deg, transparent 90%, rgba(0,0,0,0.1) 95%, rgba(0,0,0,0.2) 100%);
+        pointer-events: none;
+      }
+      .patina-sunbleach {
+        filter: sepia(0.2) contrast(0.95) brightness(1.05);
+      }
+      
+      /* Loader */
+      @keyframes pulse-ring {
+        0% { transform: scale(0.8); opacity: 0.5; }
+        100% { transform: scale(1.3); opacity: 0; }
+      }
+      .loader-ring {
+        animation: pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
       }
     </style>
   <script type="importmap">
@@ -103,15 +260,16 @@
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      // Use absolute path for SW to avoid relative path issues in sub-directories/previews
-      navigator.serviceWorker.register('/sw.js', { scope: '/' })
-        .then(reg => console.log('Service Worker registered'))
-        .catch(err => console.log('Service Worker registration failed (expected in some preview envs): ', err));
+      navigator.serviceWorker.register('./sw.js', { scope: './' })
+        .catch(err => console.log('SW registration failed: ', err));
     });
   }
 </script>
 </head>
-  <body class="antialiased overflow-hidden selection:bg-rose-200 selection:text-rose-900" data-theme="sakura-night">
+  <body class="antialiased overflow-hidden" data-texture="grain" data-lighting="ambient">
+    <div class="texture-grain"></div>
+    <div class="texture-halftone"></div>
+    <div class="spotlight-mask"></div>
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
   </body>

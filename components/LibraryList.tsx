@@ -1,6 +1,6 @@
 import React from 'react';
 import { Library } from '../types';
-import { FolderHeart, Plus, Trash2, HardDrive, Palette } from 'lucide-react';
+import { Plus, Trash2, Palette, Folder } from 'lucide-react';
 
 interface LibraryListProps {
   libraries: Library[];
@@ -18,79 +18,78 @@ export const LibraryList: React.FC<LibraryListProps> = ({
   onToggleTheme
 }) => {
   return (
-    <div className="h-full overflow-y-auto bg-[var(--bg-main)] flex flex-col items-center p-6 md:p-10 transition-colors duration-300">
-      <div className="w-full max-w-4xl space-y-10 mt-10">
-        <div className="flex items-end justify-between border-b border-[var(--border-color)] pb-6">
-          <div className="text-left">
-             <h1 className="text-3xl font-serif text-[var(--text-main)]">Collections</h1>
-             <p className="text-[var(--text-muted)] mt-1">Manage your local library folders.</p>
+    <div className="h-full overflow-y-auto flex flex-col items-center p-6 md:p-12 transition-colors duration-700">
+      
+      {/* Header */}
+      <div className="w-full max-w-2xl mt-12 mb-16 flex items-end justify-between border-b border-[var(--border-color)] pb-4">
+          <div>
+            <h1 className="text-4xl font-serif text-[var(--text-main)] mb-2">Collections</h1>
+            <p className="mono text-xs text-[var(--text-muted)] uppercase tracking-widest">Index / Local Storage</p>
           </div>
           <button 
              onClick={onToggleTheme}
-             className="p-2 text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--bg-card)] rounded-full transition-colors mb-1"
+             className="p-3 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"
+             title="Toggle Theme"
           >
              <Palette className="w-5 h-5" />
           </button>
-        </div>
+      </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {libraries.map((lib) => (
+      {/* The Stack */}
+      <div className="w-full max-w-2xl space-y-2">
+        {libraries.map((lib, index) => (
             <div 
               key={lib.id}
-              className="group relative bg-[var(--bg-card)] border border-[var(--border-color)] rounded-xl p-6 hover:shadow-lg hover:border-[var(--accent)] transition-all duration-300 flex flex-col cursor-pointer"
               onClick={() => onSelectLibrary(lib)}
+              className="group relative w-full cursor-pointer"
+              style={{ animationDelay: `${index * 50}ms` }}
             >
-              <div className="flex-1 flex flex-col space-y-4">
-                <div className="flex items-start justify-between">
-                    <div className="p-3 bg-[var(--bg-main)] rounded-lg transition-colors group-hover:text-[var(--accent)]">
-                        <FolderHeart className="w-8 h-8 text-[var(--text-muted)] group-hover:text-[var(--accent)]" />
+                {/* Folder Tab Look */}
+                <div className="relative z-10 bg-[var(--bg-card)] border border-[var(--border-color)] p-6 rounded-lg transition-all duration-500 ease-out-expo group-hover:-translate-y-1 group-hover:shadow-[var(--shadow-elevation)] flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 flex items-center justify-center bg-[var(--bg-main)] rounded border border-[var(--border-color)] text-[var(--text-muted)] group-hover:text-[var(--text-main)] group-hover:border-[var(--text-main)] transition-all">
+                             <Folder className="w-4 h-4" />
+                        </div>
+                        <div>
+                            <h3 className="text-lg font-medium text-[var(--text-main)]">{lib.name}</h3>
+                            <p className="mono text-[10px] text-[var(--text-muted)] mt-1 uppercase tracking-wider">
+                                {new Date(lib.addedAt).toLocaleDateString()}
+                            </p>
+                        </div>
                     </div>
-                    <div className="inline-flex items-center text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] bg-[var(--bg-main)] px-2 py-1 rounded border border-[var(--border-color)]">
-                        <HardDrive className="w-3 h-3 mr-1" />
-                        Local
-                    </div>
-                </div>
-                
-                <div>
-                  <h3 className="text-lg font-semibold text-[var(--text-main)] group-hover:text-[var(--accent)] transition-colors truncate">
-                    {lib.name}
-                  </h3>
-                  <p className="text-sm text-[var(--text-muted)] mt-1">
-                    Added {new Date(lib.addedAt).toLocaleDateString()}
-                  </p>
-                </div>
-              </div>
 
-              <button 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if(confirm('Are you sure you want to remove this library?')) {
-                    onDeleteLibrary(lib.id);
-                  }
-                }}
-                className="absolute top-4 right-4 p-2 text-[var(--text-muted)] hover:text-red-500 hover:bg-[var(--bg-main)] rounded-full transition-all opacity-0 group-hover:opacity-100"
-                title="Remove Library"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+                    <button 
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            if(confirm('Remove this collection?')) onDeleteLibrary(lib.id);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 p-2 text-[var(--text-muted)] hover:text-red-500 transition-all"
+                    >
+                        <Trash2 className="w-4 h-4" />
+                    </button>
+                </div>
+
+                {/* Stack Effect Behind */}
+                <div className="absolute inset-0 bg-[var(--border-color)] rounded-lg transform translate-y-1 translate-x-1 -z-10 transition-transform duration-500 group-hover:translate-y-2 group-hover:translate-x-2 opacity-30" />
             </div>
-          ))}
+        ))}
 
-          {/* Add New Button */}
-          {libraries.length < 5 && (
-             <button 
+        {/* Add New Slot */}
+        {libraries.length < 5 && (
+            <button 
                onClick={onAddLibrary}
-               className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-[var(--border-color)] rounded-xl hover:border-[var(--accent)] hover:bg-[var(--bg-card)] transition-all text-[var(--text-muted)] hover:text-[var(--accent)] gap-3 min-h-[160px]"
-             >
-               <Plus className="w-8 h-8" />
-               <span className="font-medium">Add Library</span>
-             </button>
-          )}
-        </div>
-        
-        {libraries.length >= 5 && (
-            <p className="text-center text-xs text-[var(--text-muted)]">Maximum of 5 libraries reached.</p>
+               className="w-full p-6 border border-dashed border-[var(--border-color)] rounded-lg text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-[var(--text-main)] hover:bg-[var(--bg-card)] transition-all flex items-center justify-center gap-3 group mt-4"
+            >
+               <Plus className="w-4 h-4 group-hover:scale-110 transition-transform" />
+               <span className="mono text-xs uppercase tracking-widest">Import New Folder</span>
+            </button>
         )}
+      </div>
+
+      <div className="mt-auto py-12">
+        <p className="mono text-[10px] text-[var(--text-muted)] opacity-30">
+            {libraries.length} / 5 Slots Used
+        </p>
       </div>
     </div>
   );

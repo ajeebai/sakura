@@ -1,10 +1,12 @@
-import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { Book, LibraryViewMode, SortOption } from '../types';
+
+import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import { Book, LibraryViewMode } from '../types';
 import { generateThumbnail, generatePdfThumbnail, generateArchiveThumbnail } from '../utils/imageUtils';
-import { dbUpdateBook, dbGetFavoriteFolders, dbToggleFavoriteFolder } from '../services/db';
-import { Search, BookOpen, Heart, MoreHorizontal, ChevronLeft, ChevronRight, LayoutGrid, List, ArrowDownAZ, Calendar, Clock, Play, History, Shuffle, Folder, Home, Star, Layout, Palette } from 'lucide-react';
+import { dbUpdateBook, dbGetFavoriteFolders } from '../services/db';
+import { Search, Heart, ChevronLeft, Folder, Layout, X } from 'lucide-react';
 import { EditBookModal } from './EditBookModal';
 import { naturalSort } from '../utils/fileUtils';
+import { playClickSfx, playHoverSfx } from '../services/audio';
 
 interface LibraryViewProps {
   books: Book[];
@@ -12,7 +14,47 @@ interface LibraryViewProps {
   onUpdateBook: (bookId: string, changes: Partial<Book>) => void;
   onGoHome: () => void;
   onToggleTheme: () => void;
+  viewMode: LibraryViewMode;
+  enableSfx: boolean;
+  isSearchOpen: boolean; 
+  onToggleSearch: (open: boolean) => void;
 }
+
+// --- Digital Patina Component ---
+const PatinaOverlay: React.FC<{ readCount: number }> = ({ readCount }) => {
+    if (readCount < 2) return null;
+
+    // Intensity based on reads. 
+    // < 5: Pristine
+    // 5 - 20: Light wear
+    // > 20: Heavy wear
+    
+    const intensity = Math.min(1, Math.max(0, (readCount - 2) / 30)); 
+    
+    return (
+        <div className="absolute inset-0 pointer-events-none z-20">
+            {/* Creases */}
+            {readCount > 5 && (
+                <div 
+                    className="absolute top-0 right-0 w-16 h-16 patina-crease"
+                    style={{ opacity: intensity * 0.5 }}
+                />
+            )}
+            {/* Sunbleaching / Yellowing */}
+            <div 
+                className="absolute inset-0 bg-yellow-100/10 mix-blend-multiply"
+                style={{ opacity: intensity * 0.3 }}
+            />
+            {/* Edge Wear */}
+            <div 
+                className="absolute inset-0 border border-white/20"
+                style={{ 
+                    boxShadow: `inset 0 0 ${20 * intensity}px rgba(0,0,0, ${0.2 * intensity})`,
+                }}
+            />
+        </div>
+    );
+};
 
 // --- Book Card ---
 const BookCard: React.FC<{ 
@@ -25,635 +67,257 @@ const BookCard: React.FC<{
     className?: string;
     priority?: boolean;
     showProgress?: boolean;
-}> = React.memo(({ book, onClick, onToggleFavorite, onEdit, width, height, className, priority, showProgress = true }) => {
+    style?: React.CSSProperties;
+}> = React.memo(({ book, onClick, width, height, className, priority, showProgress = true, style }) => {
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
-  const [isHovered, setIsHovered] = useState(false);
 
   useEffect(() => {
     let active = true;
-
     const loadCover = async () => {
-      // 1. If we already have a cached blob, use it
       if (book.coverImage) {
-        const url = URL.createObjectURL(book.coverImage);
-        if (active) setCoverUrl(url);
+        if (active) setCoverUrl(URL.createObjectURL(book.coverImage));
         return; 
       }
-
-      // 2. Generate from Cover Handle (for Folders)
       if (book.coverHandle) {
         try {
             const file = await book.coverHandle.getFile();
-            if (file.size < 20 * 1024 * 1024) { // Limit size for performance
+            if (file.size < 20 * 1024 * 1024) { 
                  const thumbnailBlob = await generateThumbnail(file);
-                 
-                 // Persist to DB
-                 await dbUpdateBook({
-                    ...book,
-                    coverImage: thumbnailBlob,
-                    // Strip runtime handles before saving to 'items' store
-                    handle: undefined, pages: undefined, coverHandle: undefined, readingProgress: undefined 
-                } as any);
-                
-                const url = URL.createObjectURL(thumbnailBlob);
-                if (active) setCoverUrl(url);
+                 await dbUpdateBook({ ...book, coverImage: thumbnailBlob, handle: undefined, pages: undefined, coverHandle: undefined, readingProgress: undefined } as any);
+                 if (active) setCoverUrl(URL.createObjectURL(thumbnailBlob));
             }
         } catch (e) { /* silent */ }
       }
-      
-      // 3. Generate from Main Handle (for PDF / Archive)
       else if (book.handle && (book.format === 'pdf' || book.format === 'archive')) {
          try {
-             // We need to cast because in some contexts book.handle might be DirectoryHandle, but here we know it's a file for pdf/archive
              const file = await (book.handle as any).getFile();
-             let thumbnailBlob: Blob | null = null;
-
-             if (book.format === 'pdf') {
-                 thumbnailBlob = await generatePdfThumbnail(file);
-             } else if (book.format === 'archive') {
-                 thumbnailBlob = await generateArchiveThumbnail(file);
-             }
-
+             let thumbnailBlob = book.format === 'pdf' ? await generatePdfThumbnail(file) : await generateArchiveThumbnail(file);
              if (thumbnailBlob) {
-                 await dbUpdateBook({
-                    ...book,
-                    coverImage: thumbnailBlob,
-                    handle: undefined, pages: undefined, coverHandle: undefined, readingProgress: undefined 
-                 } as any);
-                 
-                 const url = URL.createObjectURL(thumbnailBlob);
-                 if (active) setCoverUrl(url);
+                 await dbUpdateBook({ ...book, coverImage: thumbnailBlob, handle: undefined, pages: undefined, coverHandle: undefined, readingProgress: undefined } as any);
+                 if (active) setCoverUrl(URL.createObjectURL(thumbnailBlob));
              }
-         } catch (e) {
-             // console.warn("Failed to generate thumb for single file book", book.title, e);
-         }
+         } catch (e) { }
       }
     };
-    
     loadCover();
-    
-    return () => { 
-        active = false;
-        if (coverUrl) URL.revokeObjectURL(coverUrl);
-    };
-  }, [book.id, book.coverImage, book.coverHandle, book.handle, book.format]); 
+    return () => { active = false; if (coverUrl) URL.revokeObjectURL(coverUrl); };
+  }, [book.id, book.coverImage]); 
 
   const progress = book.readingProgress;
   const percentage = progress?.percentage || 0;
-  const isCompleted = progress?.status === 'completed';
+  const readCount = book.readCount || 0;
+
+  const handleWheel = (e: React.WheelEvent) => {
+      if (e.ctrlKey && e.deltaY < -10) {
+          e.preventDefault();
+          e.stopPropagation();
+          onClick();
+      }
+  };
 
   return (
     <div 
       onClick={onClick}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      className={`relative flex-shrink-0 cursor-pointer transition-all duration-500 snap-center ${book.isHidden ? 'opacity-40' : 'opacity-100'} ${className || ''}`}
-      style={{ width, height }}
+      onMouseEnter={() => playHoverSfx()}
+      onWheel={handleWheel}
+      className={`relative flex-shrink-0 cursor-pointer group ${book.isHidden ? 'opacity-40' : 'opacity-100'} ${className || ''}`}
+      style={{ width, height, ...style }}
     >
       <div 
-        className="relative w-full h-full rounded-md overflow-hidden bg-[var(--bg-card)] transition-transform duration-500 ease-out-expo border border-[var(--border-color)] aspect-[2/3]"
-        style={{
-            transform: isHovered ? 'scale(1.05)' : 'scale(1)',
-            zIndex: isHovered ? 10 : 1,
-            boxShadow: isHovered ? 'var(--shadow-elevation)' : 'none'
-        }}
+        className={`relative w-full h-full bg-[var(--bg-card)] overflow-hidden transition-all duration-300 ease-[var(--ease-out-expo)] aspect-[2/3] border border-[var(--border-color)] shadow-md group-hover:scale-110 group-hover:shadow-2xl group-hover:border-[var(--text-main)] group-hover:z-50 ${readCount > 10 ? 'patina-sunbleach' : ''}`}
       >
+        <PatinaOverlay readCount={readCount} />
+
         {coverUrl ? (
           <img 
             src={coverUrl} 
             alt={book.title} 
-            className={`w-full h-full object-cover transition-all duration-700 ${isCompleted ? 'grayscale opacity-70' : 'grayscale-[0.1]'}`}
+            className="w-full h-full object-cover grayscale-[0.2] contrast-[1.1] transition-all duration-1000 group-hover:grayscale-0"
             loading={priority ? "eager" : "lazy"}
           />
         ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center text-[var(--text-muted)] p-4 text-center bg-[var(--bg-card)]">
-            <BookOpen className="w-8 h-8 mb-2 opacity-30" />
-            <span className="text-[10px] tracking-[0.2em] uppercase font-serif opacity-50 truncate w-full">
-                {book.format === 'pdf' ? 'PDF' : book.format === 'archive' ? 'ARCHIVE' : 'BOOK'}
+          <div className="w-full h-full flex flex-col items-center justify-center bg-[var(--bg-card)] p-4 border border-dashed border-[var(--border-color)]">
+            <span className="mono text-[10px] uppercase text-[var(--text-muted)] tracking-widest break-all text-center">
+                {book.title.slice(0, 4)}
             </span>
           </div>
         )}
 
-        {/* Ambient Overlay on Hover */}
-        <div className={`absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent transition-opacity duration-500 ${isHovered ? 'opacity-100' : 'opacity-0'}`} />
-        
-        {/* Floating Actions */}
-        <div className={`absolute top-2 right-2 flex items-center gap-1 transition-all duration-300 z-20 ${isHovered ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'}`}>
-            <button 
-                onClick={(e) => { e.stopPropagation(); onToggleFavorite(e); }}
-                className={`p-1.5 rounded-full backdrop-blur-md transition-colors ${book.isFavorite ? 'bg-[var(--accent)] text-white' : 'bg-black/40 text-white hover:bg-[var(--accent)]'}`}
-            >
-                <Heart className={`w-3 h-3 ${book.isFavorite ? 'fill-current' : ''}`} />
-            </button>
-            <button 
-                onClick={(e) => { e.stopPropagation(); onEdit(e); }}
-                className="p-1.5 rounded-full bg-black/40 backdrop-blur-md text-white hover:bg-white hover:text-black transition-colors"
-            >
-                <MoreHorizontal className="w-3 h-3" />
-            </button>
+        <div className={`absolute inset-0 bg-gradient-to-t from-[var(--bg-overlay)] via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 flex flex-col justify-end p-4 z-30`}>
+             <h3 className="text-[var(--text-main)] font-medium text-sm leading-tight line-clamp-2 font-serif drop-shadow-md">{book.title}</h3>
         </div>
 
-        {/* Progress Bar */}
-        {showProgress && percentage > 0 && !isCompleted && (
-            <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/50">
-                <div 
-                    className="h-full bg-[var(--accent)]" 
-                    style={{ width: `${percentage}%` }}
-                />
+        {book.isFavorite && (
+            <div className="absolute top-2 right-2 text-[var(--accent)] drop-shadow-md z-30">
+                <Heart className="w-3 h-3 fill-current" />
             </div>
         )}
 
-        {/* Title Overlay (Only on hover) */}
-        <div className={`absolute bottom-0 left-0 right-0 p-3 transform transition-all duration-500 ${isHovered ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0'}`}>
-            <h3 className="text-white font-medium text-xs leading-tight line-clamp-2">
-                {book.title}
-            </h3>
-        </div>
+        {showProgress && percentage > 0 && percentage < 100 && (
+            <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-black/20 z-30">
+                <div className="h-full bg-[var(--accent)]" style={{ width: `${percentage}%` }} />
+            </div>
+        )}
+        
+        <div className="absolute inset-0 bg-gradient-to-tr from-white/0 via-white/10 to-white/0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none mix-blend-overlay z-40" />
       </div>
     </div>
   );
 });
 
-// --- Cinematic Hero Section ---
-const HeroSection: React.FC<{ book: Book; onRead: () => void; onShuffle: () => void }> = ({ book, onRead, onShuffle }) => {
-    const [coverUrl, setCoverUrl] = useState<string | null>(null);
+// --- LibraryView Main ---
 
-    useEffect(() => {
-        if (book.coverImage) {
-            setCoverUrl(URL.createObjectURL(book.coverImage));
-        } else if (book.coverHandle) {
-             book.coverHandle.getFile().then(f => generateThumbnail(f, 600)).then(blob => {
-                 setCoverUrl(URL.createObjectURL(blob));
-             }).catch(() => {});
-        } else if (book.handle && (book.format === 'pdf' || book.format === 'archive')) {
-            // Lazy load for hero too
-            (book.handle as any).getFile().then(async (f: File) => {
-                 if (book.format === 'pdf') return generatePdfThumbnail(f, 600);
-                 if (book.format === 'archive') return generateArchiveThumbnail(f, 600);
-                 throw new Error('Unsupported');
-            }).then(blob => {
-                 setCoverUrl(URL.createObjectURL(blob));
-            }).catch(() => {});
-        }
-    }, [book]);
-
-    if (!book) return null;
-
-    return (
-        <div className="relative w-full h-[60vh] min-h-[400px] overflow-hidden group mb-4">
-            {/* Background Blur */}
-            <div className="absolute inset-0 w-full h-full">
-                {coverUrl && (
-                    <img 
-                        src={coverUrl} 
-                        className="w-full h-full object-cover opacity-30 blur-3xl scale-110" 
-                        alt="Background"
-                    />
-                )}
-                <div className="absolute inset-0 bg-gradient-to-t from-[var(--bg-main)] via-[var(--bg-main)]/50 to-transparent" />
-                <div className="absolute inset-0 bg-gradient-to-r from-[var(--bg-main)] via-transparent to-transparent" />
-            </div>
-
-            {/* Content */}
-            <div className="absolute inset-0 flex items-end pb-12 px-8 md:px-16 z-10">
-                <div className="flex flex-col md:flex-row items-end md:items-end gap-8 w-full max-w-7xl mx-auto">
-                    
-                    {/* Featured Cover */}
-                    <div 
-                        className="hidden md:block flex-shrink-0 w-48 aspect-[2/3] rounded-lg shadow-2xl overflow-hidden border border-[var(--border-color)] transform transition-transform group-hover:scale-105 duration-700 cursor-pointer"
-                        onClick={onRead}
-                    >
-                         {coverUrl ? <img src={coverUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full bg-black/50" />}
-                    </div>
-
-                    {/* Text Info */}
-                    <div className="flex-1 space-y-4 mb-2">
-                        <div className="flex items-center space-x-2 mb-2">
-                            {book.category && (
-                                <span className="px-2 py-1 bg-white/10 backdrop-blur-md rounded text-[10px] uppercase tracking-widest font-bold text-[var(--accent)] border border-white/10">
-                                    {book.category}
-                                </span>
-                            )}
-                            <span className="text-xs text-[var(--text-muted)] uppercase tracking-wider">Featured</span>
-                        </div>
-                        
-                        <h1 className="text-4xl md:text-6xl font-serif font-bold text-[var(--text-main)] leading-tight drop-shadow-lg line-clamp-2">
-                            {book.title}
-                        </h1>
-                        
-                        <p className="max-w-xl text-[var(--text-muted)] line-clamp-3 md:line-clamp-2 text-sm md:text-base leading-relaxed">
-                            Dive back into your collection. {book.pageCount > 0 ? `${book.pageCount} pages.` : ''} 
-                            {book.readingProgress?.percentage ? ` You are ${book.readingProgress.percentage}% through.` : ' Start reading now.'}
-                        </p>
-
-                        <div className="pt-4 flex items-center gap-4">
-                            <button 
-                                onClick={onRead}
-                                className="flex items-center gap-2 px-8 py-3 bg-[var(--text-main)] text-[var(--bg-main)] rounded-lg font-bold hover:bg-[var(--accent)] hover:text-white transition-all shadow-lg hover:shadow-[var(--accent)]/30"
-                            >
-                                <Play className="w-5 h-5 fill-current" />
-                                {book.readingProgress?.percentage ? 'Continue Reading' : 'Read Now'}
-                            </button>
-
-                            <button
-                                onClick={onShuffle}
-                                title="Surprise Me (Shuffle)"
-                                className="p-3 bg-white/10 backdrop-blur-md border border-white/10 rounded-lg hover:bg-[var(--accent)] hover:border-[var(--accent)] transition-all text-white"
-                            >
-                                <Shuffle className="w-5 h-5" />
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-// --- Category Row ---
-const CategoryRow: React.FC<{
-    title: string;
-    path: string;
-    books: Book[];
-    onSelectBook: (id: string) => void;
-    onToggleFavorite: (id: string, val: boolean) => void;
-    onEdit: (id: string) => void;
-    onTitleClick?: () => void;
-    icon?: React.ReactNode;
-    isFavoriteFolder?: boolean;
-    onToggleFolderFavorite?: () => void;
-}> = ({ title, path, books, onSelectBook, onToggleFavorite, onEdit, onTitleClick, icon, isFavoriteFolder, onToggleFolderFavorite }) => {
-    const scrollRef = useRef<HTMLDivElement>(null);
-
-    const scroll = (direction: 'left' | 'right') => {
-        if (scrollRef.current) {
-            const container = scrollRef.current;
-            const scrollAmount = container.clientWidth * 0.8; 
-            const target = direction === 'left' 
-                ? container.scrollLeft - scrollAmount 
-                : container.scrollLeft + scrollAmount;
-            
-            container.scrollTo({ left: target, behavior: 'smooth' });
-        }
-    };
-
-    return (
-        <div className="mb-10 md:mb-14 group/row relative">
-            <div 
-                className={`px-8 md:px-12 flex items-center gap-2 mb-4 group/title`}
-            >
-                <div onClick={onTitleClick} className={`flex items-center gap-2 ${onTitleClick ? 'cursor-pointer' : ''}`}>
-                    {icon}
-                    <h2 className="text-lg md:text-xl font-medium text-[var(--text-main)] group-hover/title:text-[var(--accent)] transition-colors flex items-center gap-2">
-                        {title}
-                        {onTitleClick && <ChevronRight className="w-4 h-4 opacity-0 group-hover/title:opacity-100 -translate-x-2 group-hover/title:translate-x-0 transition-all text-[var(--accent)]" />}
-                    </h2>
-                    <span className="text-xs font-sans text-[var(--text-muted)] opacity-50 uppercase tracking-widest translate-y-[1px]">
-                        {books.length}
-                    </span>
-                </div>
-
-                {onToggleFolderFavorite && (
-                    <button 
-                        onClick={onToggleFolderFavorite} 
-                        className={`ml-4 p-1.5 rounded-full border transition-all ${isFavoriteFolder ? 'bg-[var(--accent)] text-white border-[var(--accent)]' : 'border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--accent)] hover:border-[var(--accent)]'}`}
-                        title={isFavoriteFolder ? "Remove from Favorite Folders" : "Add to Favorite Folders"}
-                    >
-                        <Star className={`w-3 h-3 ${isFavoriteFolder ? 'fill-current' : ''}`} />
-                    </button>
-                )}
-            </div>
-            
-            <div className="relative group">
-                <button 
-                    onClick={() => scroll('left')}
-                    className="absolute left-0 top-0 bottom-0 w-12 md:w-16 bg-gradient-to-r from-[var(--bg-main)] to-transparent z-20 flex items-center justify-start pl-2 md:pl-4 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-0 hover:from-black/80"
-                >
-                    <ChevronLeft className="w-8 h-8 text-white drop-shadow-lg" />
-                </button>
-
-                <div 
-                    ref={scrollRef}
-                    className="flex overflow-x-auto gap-4 md:gap-6 px-8 md:px-12 pb-8 snap-x-mandatory scrollbar-hide pt-2"
-                    style={{ scrollBehavior: 'smooth' }}
-                >
-                    {books.map(book => (
-                        <BookCard
-                            key={book.id}
-                            book={book}
-                            width={170} 
-                            height={255}
-                            className="transform transition-transform duration-300 hover:-translate-y-2"
-                            onClick={() => onSelectBook(book.id)}
-                            onToggleFavorite={(e) => onToggleFavorite(book.id, !book.isFavorite)}
-                            onEdit={(e) => onEdit(book.id)}
-                        />
-                    ))}
-                    <div className="w-12 flex-shrink-0" />
-                </div>
-
-                <button 
-                    onClick={() => scroll('right')}
-                    className="absolute right-0 top-0 bottom-0 w-12 md:w-16 bg-gradient-to-l from-[var(--bg-main)] to-transparent z-20 flex items-center justify-end pr-2 md:pr-4 opacity-0 group-hover:opacity-100 transition-opacity hover:from-black/80"
-                >
-                    <ChevronRight className="w-8 h-8 text-white drop-shadow-lg" />
-                </button>
-            </div>
-        </div>
-    );
-};
-
-export const LibraryView: React.FC<LibraryViewProps> = ({ books, onSelectBook, onUpdateBook, onGoHome, onToggleTheme }) => {
+export const LibraryView: React.FC<LibraryViewProps> = ({ 
+    books, onSelectBook, onUpdateBook, onGoHome, viewMode, enableSfx,
+    isSearchOpen, onToggleSearch
+}) => {
   const [search, setSearch] = useState('');
-  const [showHeader, setShowHeader] = useState(true);
-  const [viewMode, setViewMode] = useState<LibraryViewMode>('category');
-  const [sortOption, setSortOption] = useState<SortOption>('title');
-  const [currentPath, setCurrentPath] = useState<string>(''); // For folder navigation
-  
-  // Favorites State
+  const [currentPath, setCurrentPath] = useState<string>(''); 
   const [favoriteFolders, setFavoriteFolders] = useState<Set<string>>(new Set());
+  const [editingBookId, setEditingBookId] = useState<string | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-      dbGetFavoriteFolders().then(folders => setFavoriteFolders(new Set(folders)));
-  }, []);
-
-  const toggleFolderFav = async (path: string) => {
-      const newFavs = await dbToggleFavoriteFolder(path);
-      setFavoriteFolders(new Set(newFavs));
-  };
+  useEffect(() => { dbGetFavoriteFolders().then(folders => setFavoriteFolders(new Set(folders))); }, []);
   
-  const lastScrollY = useRef(0);
-
-  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-      const currentScrollY = e.currentTarget.scrollTop;
-      if (currentScrollY > lastScrollY.current && currentScrollY > 100) {
-          setShowHeader(false);
-      } else {
-          setShowHeader(true);
+  // Focus search when opened
+  useEffect(() => {
+      if (isSearchOpen && searchInputRef.current) {
+          searchInputRef.current.focus();
       }
-      lastScrollY.current = currentScrollY;
-  };
+      if (!isSearchOpen) {
+          setSearch('');
+      }
+  }, [isSearchOpen]);
 
   const sortedBooks = useMemo(() => {
-    let filtered = books.filter(b => {
-        const matchesSearch = b.title.toLowerCase().includes(search.toLowerCase());
-        const isVisible = !b.isHidden; 
-        return matchesSearch && isVisible;
-    });
+    let filtered = books.filter(b => (b.title.toLowerCase().includes(search.toLowerCase())) && !b.isHidden);
+    return filtered.sort((a, b) => naturalSort(a.title, b.title));
+  }, [books, search]);
 
-    return filtered.sort((a, b) => {
-        switch (sortOption) {
-            case 'added': return b.addedAt - a.addedAt;
-            case 'recent': return (b.lastReadAt || 0) - (a.lastReadAt || 0);
-            case 'title': default: return naturalSort(a.title, b.title);
-        }
-    });
-  }, [books, search, sortOption]);
+  // Logic for category/folder view
+  const { categorizedGroups, currentFolderBooks } = useMemo(() => {
+    if (viewMode !== 'category') return { categorizedGroups: [], currentFolderBooks: sortedBooks };
 
-  // --- Grouping Logic for Deep Navigation ---
-  const { categorizedGroups, currentFolderBooks, favorites, continueReading } = useMemo(() => {
-    // 1. Global Lists (for Home screen)
-    const favs = sortedBooks.filter(b => b.isFavorite);
-    const reading = sortedBooks.filter(b => b.readingProgress?.status === 'in_progress').sort((a,b) => (b.lastReadAt||0) - (a.lastReadAt||0));
-    
-    // 2. Folder Navigation Logic
     const groups: Record<string, Book[]> = {};
     const flatBooks: Book[] = [];
     
     sortedBooks.forEach(book => {
-        // Only consider books inside currentPath
         if (!book.path.startsWith(currentPath)) return;
-        
-        // Relativize path. 
-        // If currentPath is "", path "Manga/Naruto" -> "Manga/Naruto"
-        let relativePath = book.path;
-        if (currentPath) {
-            // Add slash to ensure we match directory boundary
-            const prefix = currentPath + '/';
-            if (!book.path.startsWith(prefix)) return; 
-            relativePath = book.path.substring(prefix.length);
-        }
-
+        let relativePath = currentPath ? book.path.substring(currentPath.length + (currentPath ? 1 : 0)) : book.path;
         const parts = relativePath.split('/');
-        
-        if (parts.length === 1) {
-            // It's a book directly in this folder
-            flatBooks.push(book);
-        } else {
-            // It's in a subfolder
-            const subFolderName = parts[0];
-            if (!groups[subFolderName]) groups[subFolderName] = [];
-            groups[subFolderName].push(book);
+        if (parts.length === 1) flatBooks.push(book);
+        else {
+            const sub = parts[0];
+            if (!groups[sub]) groups[sub] = [];
+            groups[sub].push(book);
         }
     });
 
-    const sortedGroupKeys = Object.keys(groups).sort(naturalSort);
-    const resultGroups = sortedGroupKeys.map(key => ({ 
+    const resultGroups = Object.keys(groups).sort(naturalSort).map(key => ({ 
         title: key.replace(/[_-]/g, ' '), 
-        originalPath: currentPath ? `${currentPath}/${key}` : key, // Keep FULL path for navigation
+        originalPath: currentPath ? `${currentPath}/${key}` : key, 
         books: groups[key] 
     }));
 
-    // Prioritize Favorite Folders to top of list
-    resultGroups.sort((a, b) => {
-        const aFav = favoriteFolders.has(a.originalPath);
-        const bFav = favoriteFolders.has(b.originalPath);
-        if (aFav && !bFav) return -1;
-        if (!aFav && bFav) return 1;
-        return 0;
-    });
+    return { categorizedGroups: resultGroups, currentFolderBooks: flatBooks };
+  }, [sortedBooks, currentPath, viewMode]);
 
-    return { 
-        categorizedGroups: resultGroups, 
-        currentFolderBooks: flatBooks,
-        favorites: favs,
-        continueReading: reading
-    };
-  }, [sortedBooks, currentPath, favoriteFolders]);
-
-  // Featured Book (only from current view scope)
-  const featuredBook = useMemo(() => {
-      // If we are deep in folders, maybe pick one from here
-      const pool = currentFolderBooks.length > 0 ? currentFolderBooks : 
-                   categorizedGroups.length > 0 ? categorizedGroups[0].books : [];
-      
-      if (pool.length === 0) return null;
-      return pool.find(b => b.isFavorite) || pool[0];
-  }, [currentFolderBooks, categorizedGroups]);
-
-  const navigateToFolder = (folderName: string) => {
-      // folderName here is the FULL path constructed above
-      setCurrentPath(folderName);
-      setViewMode('category'); 
+  const navigateToFolder = (folderName: string) => { 
+      if(enableSfx) playClickSfx();
+      setCurrentPath(folderName); 
+  };
+  const navigateUp = () => { 
+      if(enableSfx) playClickSfx();
+      if (!currentPath) return; 
+      setCurrentPath(currentPath.split('/').slice(0, -1).join('/')); 
   };
 
-  const navigateUp = () => {
-      if (!currentPath) return;
-      const parts = currentPath.split('/');
-      parts.pop();
-      setCurrentPath(parts.join('/'));
-  };
-
-  const navigateToBreadcrumb = (index: number) => {
-      if (index === -1) setCurrentPath('');
-      else {
-          const parts = currentPath.split('/');
-          setCurrentPath(parts.slice(0, index + 1).join('/'));
-      }
-  };
-
-  const handleShuffle = () => {
-      // Shuffle from *visible* books in current scope
-      const scopeBooks = [...currentFolderBooks, ...categorizedGroups.flatMap(g => g.books)];
-      if (scopeBooks.length === 0) return;
-      const randomBook = scopeBooks[Math.floor(Math.random() * scopeBooks.length)];
-      onSelectBook(randomBook.id);
-  };
-
-  const [editingBookId, setEditingBookId] = useState<string | null>(null);
-  const activeBook = books.find(b => b.id === editingBookId);
+  // --- Render ---
 
   return (
     <div className="flex flex-col h-full bg-[var(--bg-main)] transition-colors duration-700 relative">
       
-      {/* Header */}
-      <header 
-        className={`absolute top-0 left-0 right-0 z-30 px-8 py-6 flex flex-col md:flex-row items-start md:items-center justify-between transition-transform duration-500 ease-out-expo ${showHeader ? 'translate-y-0' : '-translate-y-full'} bg-gradient-to-b from-[var(--bg-main)] to-transparent pointer-events-auto`}
-      >
-         {/* Navigation / Breadcrumbs / Search */}
-         <div className="flex flex-col gap-4 w-full max-w-xl">
-            {/* Search */}
-            <div className="flex items-center gap-3">
-                {/* Back to Collections (only if at root) */}
-                {!currentPath && (
-                    <button 
-                        onClick={onGoHome}
-                        className="p-2.5 rounded-full bg-[var(--bg-card)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors shadow-sm"
-                        title="Back to Collections"
-                    >
-                        <Layout className="w-5 h-5" />
-                    </button>
-                )}
-                
-                <div className="relative group w-full transition-opacity duration-300">
-                    <div className={`absolute inset-0 bg-[var(--bg-overlay)] backdrop-blur-md rounded-full border border-[var(--border-color)] shadow-sm transition-all duration-300 ${search ? 'ring-1 ring-[var(--accent)]' : ''}`} />
-                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)] z-10" />
-                    <input 
-                        type="text"
-                        placeholder="Search collection..."
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                        className="relative z-10 w-full bg-transparent border-none rounded-full py-2.5 pl-12 pr-4 text-sm text-[var(--text-main)] focus:outline-none placeholder:text-[var(--text-muted)] font-serif tracking-wide"
-                    />
-                </div>
-            </div>
+      {/* Spotlight Search Floating Bar (Non-Blocking) */}
+      {isSearchOpen && (
+          <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[90] w-full max-w-2xl px-4 animate-in fade-in slide-in-from-top-4 duration-300">
+              <div className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl shadow-2xl flex items-center p-4 gap-4 ring-1 ring-[var(--text-main)]/10">
+                  <Search className="w-6 h-6 text-[var(--accent)]" />
+                  <input 
+                    ref={searchInputRef}
+                    type="text" 
+                    placeholder="Search collection..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="flex-1 bg-transparent text-xl font-serif text-[var(--text-main)] placeholder-[var(--text-muted)] focus:outline-none"
+                  />
+                  <button onClick={() => onToggleSearch(false)} className="p-2 text-[var(--text-muted)] hover:text-[var(--text-main)]">
+                      <X className="w-5 h-5" />
+                  </button>
+              </div>
+              {search && (
+                  <div className="mt-2 text-center pointer-events-none">
+                       <span className="bg-[var(--bg-overlay)] backdrop-blur px-3 py-1 rounded-full mono text-[10px] text-[var(--text-muted)] uppercase tracking-widest border border-[var(--border-color)]">
+                          {sortedBooks.length} results
+                       </span>
+                  </div>
+              )}
+          </div>
+      )}
 
-            {/* Breadcrumbs */}
-            {!search && currentPath && (
-                <div className="flex items-center gap-2 text-sm text-[var(--text-muted)] overflow-x-auto scrollbar-hide">
-                    <button onClick={() => navigateToBreadcrumb(-1)} className="hover:text-[var(--accent)] transition-colors flex items-center gap-1">
-                        <Home className="w-3 h-3" /> Root
-                    </button>
-                    {currentPath.split('/').map((part, idx) => (
-                        <React.Fragment key={idx}>
-                            <ChevronRight className="w-3 h-3 opacity-50" />
-                            <button 
-                                onClick={() => navigateToBreadcrumb(idx)} 
-                                className={`hover:text-[var(--accent)] transition-colors whitespace-nowrap ${idx === currentPath.split('/').length - 1 ? 'text-[var(--text-main)] font-medium' : ''}`}
-                            >
-                                {part.replace(/[_-]/g, ' ')}
-                            </button>
-                        </React.Fragment>
-                    ))}
-                </div>
+      {/* Header (Simplified) */}
+      <header className={`fixed top-0 left-0 right-0 z-40 px-8 py-6 flex items-center justify-between transition-transform duration-500 glass-panel border-b border-[var(--border-color)]`}>
+         <div className="flex items-center gap-6">
+            {!currentPath && (
+                <button onClick={onGoHome} className="mono text-xs uppercase tracking-widest text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors flex items-center gap-2">
+                    <Layout className="w-4 h-4" /> Collections
+                </button>
             )}
-         </div>
-
-         {/* View Controls */}
-         <div className="mt-4 md:mt-0 flex items-center space-x-2 bg-[var(--bg-overlay)] backdrop-blur-md p-1 rounded-xl border border-[var(--border-color)] shadow-xl">
-             <div className="flex items-center space-x-1 px-2 border-r border-[var(--border-color)]">
-                 <button onClick={() => setSortOption('title')} className={`p-1.5 rounded-lg ${sortOption === 'title' ? 'text-[var(--accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}><ArrowDownAZ className="w-4 h-4" /></button>
-                 <button onClick={() => setSortOption('added')} className={`p-1.5 rounded-lg ${sortOption === 'added' ? 'text-[var(--accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}><Calendar className="w-4 h-4" /></button>
-             </div>
-             <div className="flex items-center space-x-1 px-1">
-                <button onClick={() => setViewMode('category')} className={`p-1.5 rounded-lg ${viewMode === 'category' ? 'bg-[var(--bg-card)] text-[var(--text-main)]' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}><List className="w-4 h-4" /></button>
-                <button onClick={() => setViewMode('grid')} className={`p-1.5 rounded-lg ${viewMode === 'grid' ? 'bg-[var(--bg-card)] text-[var(--text-main)]' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}><LayoutGrid className="w-4 h-4" /></button>
-             </div>
-             <div className="border-l border-[var(--border-color)] pl-1">
-                 <button onClick={onToggleTheme} className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-main)]"><Palette className="w-4 h-4" /></button>
-             </div>
          </div>
       </header>
 
-      {/* Main Content */}
-      <div onScroll={handleScroll} className="flex-1 overflow-y-auto pb-20 scroll-smooth">
-          
-          {sortedBooks.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-[var(--text-muted)] opacity-50 pt-32">
-                 <BookOpen className="w-12 h-12 mb-4 font-thin opacity-50" />
-                 <p className="font-serif italic text-xl">The collection is empty.</p>
-              </div>
-          ) : viewMode === 'category' && !search ? (
-              <div className="flex flex-col pb-20">
-                  
-                  {/* Hero (Only at Root) */}
-                  {!currentPath && featuredBook && (
-                      <HeroSection book={featuredBook} onRead={() => onSelectBook(featuredBook.id)} onShuffle={handleShuffle} />
-                  )}
-
-                  {/* Spacer or Back Button Area */}
-                  <div className={`${!currentPath && featuredBook ? '' : 'pt-32'} px-8 mb-8`}>
+      <div className="flex-1 overflow-y-auto pb-32 pt-32 scroll-smooth">
+          {viewMode === 'category' && !search ? (
+              <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
+                  <div className="px-8 mb-12">
                       {currentPath && (
-                          <div className="flex items-center gap-4 mb-8">
-                             <button onClick={navigateUp} className="p-2 rounded-full border border-[var(--border-color)] hover:bg-[var(--bg-card)] transition-colors group">
-                                 <ChevronLeft className="w-6 h-6 group-hover:-translate-x-1 transition-transform" />
+                          <div className="flex items-baseline gap-4 mb-12">
+                             <button onClick={navigateUp} className="group flex items-center gap-2 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors">
+                                 <ChevronLeft className="w-4 h-4" />
+                                 <span className="mono text-xs uppercase tracking-widest">Back</span>
                              </button>
-                             <h1 className="text-3xl font-serif font-bold">{currentPath.split('/').pop()?.replace(/[_-]/g, ' ')}</h1>
+                             <h1 className="text-4xl font-serif text-[var(--text-main)]">{currentPath.split('/').pop()?.replace(/[_-]/g, ' ')}</h1>
                           </div>
                       )}
                   </div>
 
-                  {/* Special Rows (Only at Root) */}
-                  {!currentPath && (
-                      <>
-                        {continueReading.length > 0 && (
-                            <CategoryRow title="Jump Back In" path="continue" books={continueReading} onSelectBook={onSelectBook} onToggleFavorite={(id, val) => onUpdateBook(id, { isFavorite: val })} onEdit={(id) => setEditingBookId(id)} icon={<History className="w-5 h-5 text-[var(--accent)]" />} />
-                        )}
-                        {favorites.length > 0 && (
-                            <CategoryRow title="Your Favorites" path="favorites" books={favorites} onSelectBook={onSelectBook} onToggleFavorite={(id, val) => onUpdateBook(id, { isFavorite: val })} onEdit={(id) => setEditingBookId(id)} icon={<Heart className="w-5 h-5 text-rose-500 fill-current" />} />
-                        )}
-                      </>
-                  )}
-
-                  {/* Sub-Folders as Rows */}
                   {categorizedGroups.map((group) => (
-                      <CategoryRow 
-                          key={group.originalPath}
-                          title={group.title}
-                          path={group.originalPath}
-                          books={group.books}
-                          onSelectBook={onSelectBook}
-                          onToggleFavorite={(id, val) => onUpdateBook(id, { isFavorite: val })}
-                          onEdit={(id) => setEditingBookId(id)}
-                          onTitleClick={() => navigateToFolder(group.originalPath)}
-                          icon={<Folder className={`w-5 h-5 ${favoriteFolders.has(group.originalPath) ? 'text-[var(--accent)] fill-current' : 'text-[var(--text-muted)] fill-current opacity-50'}`} />}
-                          isFavoriteFolder={favoriteFolders.has(group.originalPath)}
-                          onToggleFolderFavorite={() => toggleFolderFav(group.originalPath)}
-                      />
+                      <div key={group.originalPath} className="mb-12 px-8">
+                           <div 
+                                className="flex items-baseline gap-4 mb-6 cursor-pointer group border-b border-[var(--border-color)] pb-2"
+                                onClick={() => navigateToFolder(group.originalPath)}
+                           >
+                                <h2 className="text-2xl font-serif text-[var(--text-main)] flex items-center gap-2">
+                                    <Folder className={`w-4 h-4 ${favoriteFolders.has(group.originalPath) ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`} />
+                                    {group.title}
+                                </h2>
+                                <span className="mono text-[10px] text-[var(--text-muted)] opacity-0 group-hover:opacity-100 transition-opacity">Open Folder</span>
+                           </div>
+                           <div className="flex overflow-x-auto gap-6 pb-4 scrollbar-hide -mx-4 px-4 py-8">
+                               {group.books.map(b => (
+                                   <BookCard key={b.id} book={b} width={180} height={270} onClick={() => onSelectBook(b.id)} onToggleFavorite={() => {}} onEdit={() => setEditingBookId(b.id)} />
+                               ))}
+                           </div>
+                      </div>
                   ))}
 
-                  {/* Loose Books in this Folder (Grid style at bottom) */}
                   {currentFolderBooks.length > 0 && (
-                      <div className="px-8 md:px-12 mt-8">
-                          <h2 className="text-lg md:text-xl font-medium text-[var(--text-main)] mb-6 flex items-center gap-2">
-                              <BookOpen className="w-5 h-5 text-[var(--text-muted)]" />
-                              Books in this folder
-                          </h2>
-                          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
+                      <div className="px-8 mt-12">
+                          <h2 className="mono text-xs text-[var(--text-muted)] uppercase tracking-widest mb-8">Items</h2>
+                          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-x-8 gap-y-12">
                               {currentFolderBooks.map(book => (
-                                  <div key={book.id} className="flex flex-col items-center group">
-                                      <BookCard book={book} width="100%" height="auto" onClick={() => onSelectBook(book.id)} onToggleFavorite={(e) => onUpdateBook(book.id, { isFavorite: !book.isFavorite })} onEdit={(e) => setEditingBookId(book.id)} className="w-full transform transition-transform group-hover:-translate-y-2 duration-300" />
-                                      <p className="mt-3 text-xs text-[var(--text-muted)] group-hover:text-[var(--text-main)] text-center line-clamp-2">{book.title}</p>
+                                  <div key={book.id} className="flex flex-col gap-3 group">
+                                      <BookCard book={book} width="100%" height="auto" onClick={() => onSelectBook(book.id)} onToggleFavorite={() => {}} onEdit={() => setEditingBookId(book.id)} />
+                                      <p className="font-serif text-sm text-[var(--text-muted)] group-hover:text-[var(--text-main)] leading-tight">{book.title}</p>
                                   </div>
                               ))}
                           </div>
@@ -661,21 +325,22 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ books, onSelectBook, o
                   )}
               </div>
           ) : (
-              // Grid View (Flat List of visible scope)
-              <div className="pt-32 px-8">
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-6">
-                      {(search ? sortedBooks : [...currentFolderBooks, ...categorizedGroups.flatMap(g => g.books)]).map(book => (
-                          <div key={book.id} className="flex flex-col items-center group">
-                              <BookCard book={book} width="100%" height="auto" onClick={() => onSelectBook(book.id)} onToggleFavorite={(e) => onUpdateBook(book.id, { isFavorite: !book.isFavorite })} onEdit={(e) => setEditingBookId(book.id)} className="w-full transform transition-transform group-hover:-translate-y-2 duration-300" />
-                              <p className="mt-3 text-xs text-[var(--text-muted)] group-hover:text-[var(--text-main)] text-center line-clamp-2 w-full max-w-[150px] transition-colors">{book.title}</p>
+              <div className="px-8 md:px-12">
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-x-8 gap-y-16">
+                      {(search ? sortedBooks : currentFolderBooks).map(book => (
+                          <div key={book.id} className="flex flex-col gap-3 group">
+                              <BookCard book={book} width="100%" height="auto" onClick={() => onSelectBook(book.id)} onToggleFavorite={() => {}} onEdit={() => setEditingBookId(book.id)} />
+                              <p className="font-serif text-sm text-[var(--text-muted)] group-hover:text-[var(--text-main)] leading-tight">{book.title}</p>
                           </div>
                       ))}
                   </div>
               </div>
           )}
       </div>
-
-      {activeBook && <EditBookModal book={activeBook} isOpen={!!activeBook} onClose={() => setEditingBookId(null)} onSave={onUpdateBook} />}
+      
+      {editingBookId && books.find(b => b.id === editingBookId) && (
+          <EditBookModal book={books.find(b => b.id === editingBookId)!} isOpen={true} onClose={() => setEditingBookId(null)} onSave={onUpdateBook} />
+      )}
     </div>
   );
 };
