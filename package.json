@@ -10,13 +10,14 @@
   },
   "dependencies": {
     "react": "^19.2.3",
-    "lucide-react": "^0.562.0",
+    "@phosphor-icons/react": "2.1.0",
     "react-dom": "^19.2.3",
     "idb": "8.0.0",
     "clsx": "2.1.0",
     "webworker": "^0.8.4",
     "pdfjs-dist": "3.11.174",
-    "jszip": "3.10.1"
+    "jszip": "3.10.1",
+    "react-use-gesture": "9.1.3"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

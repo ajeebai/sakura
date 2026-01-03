@@ -1,9 +1,9 @@
 
-import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
-import { Book, LibraryViewMode } from '../types';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
+import { Book, LibraryViewMode, Playlist } from '../types';
 import { generateThumbnail, generatePdfThumbnail, generateArchiveThumbnail } from '../utils/imageUtils';
-import { dbUpdateBook, dbGetFavoriteFolders } from '../services/db';
-import { Search, Heart, ChevronLeft, Folder, Layout, X } from 'lucide-react';
+import { dbUpdateBook, dbGetFavoriteFolders, dbGetPlaylists, dbCreatePlaylist, dbAddBookToPlaylist, dbRemoveBookFromPlaylist, dbDeletePlaylist } from '../services/db';
+import { MagnifyingGlass, Heart, CaretLeft, Folder, Layout, X, Plus, Trash, List, DotsThreeVertical } from '@phosphor-icons/react';
 import { EditBookModal } from './EditBookModal';
 import { naturalSort } from '../utils/fileUtils';
 import { playClickSfx, playHoverSfx } from '../services/audio';
@@ -18,40 +18,23 @@ interface LibraryViewProps {
   enableSfx: boolean;
   isSearchOpen: boolean; 
   onToggleSearch: (open: boolean) => void;
+  onContextMenu: (e: React.MouseEvent, book: Book) => void;
+  playlists: Playlist[];
+  onCreatePlaylist: () => void;
+  onDeletePlaylist: (id: string) => void;
 }
 
 // --- Digital Patina Component ---
 const PatinaOverlay: React.FC<{ readCount: number }> = ({ readCount }) => {
     if (readCount < 2) return null;
-
-    // Intensity based on reads. 
-    // < 5: Pristine
-    // 5 - 20: Light wear
-    // > 20: Heavy wear
-    
     const intensity = Math.min(1, Math.max(0, (readCount - 2) / 30)); 
-    
     return (
         <div className="absolute inset-0 pointer-events-none z-20">
-            {/* Creases */}
             {readCount > 5 && (
-                <div 
-                    className="absolute top-0 right-0 w-16 h-16 patina-crease"
-                    style={{ opacity: intensity * 0.5 }}
-                />
+                <div className="absolute top-0 right-0 w-16 h-16 patina-crease" style={{ opacity: intensity * 0.5 }} />
             )}
-            {/* Sunbleaching / Yellowing */}
-            <div 
-                className="absolute inset-0 bg-yellow-100/10 mix-blend-multiply"
-                style={{ opacity: intensity * 0.3 }}
-            />
-            {/* Edge Wear */}
-            <div 
-                className="absolute inset-0 border border-white/20"
-                style={{ 
-                    boxShadow: `inset 0 0 ${20 * intensity}px rgba(0,0,0, ${0.2 * intensity})`,
-                }}
-            />
+            <div className="absolute inset-0 bg-yellow-100/10 mix-blend-multiply" style={{ opacity: intensity * 0.3 }} />
+            <div className="absolute inset-0 border border-white/20" style={{ boxShadow: `inset 0 0 ${20 * intensity}px rgba(0,0,0, ${0.2 * intensity})` }} />
         </div>
     );
 };
@@ -60,15 +43,14 @@ const PatinaOverlay: React.FC<{ readCount: number }> = ({ readCount }) => {
 const BookCard: React.FC<{ 
     book: Book; 
     onClick: () => void;
-    onToggleFavorite: (e: React.MouseEvent) => void;
-    onEdit: (e: React.MouseEvent) => void;
+    onContextMenu: (e: React.MouseEvent) => void;
     width?: number | string;
     height?: number | string;
     className?: string;
     priority?: boolean;
     showProgress?: boolean;
     style?: React.CSSProperties;
-}> = React.memo(({ book, onClick, width, height, className, priority, showProgress = true, style }) => {
+}> = React.memo(({ book, onClick, onContextMenu, width, height, className, priority, showProgress = true, style }) => {
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
 
   useEffect(() => {
@@ -118,6 +100,7 @@ const BookCard: React.FC<{
   return (
     <div 
       onClick={onClick}
+      onContextMenu={onContextMenu}
       onMouseEnter={() => playHoverSfx()}
       onWheel={handleWheel}
       className={`relative flex-shrink-0 cursor-pointer group ${book.isHidden ? 'opacity-40' : 'opacity-100'} ${className || ''}`}
@@ -127,66 +110,53 @@ const BookCard: React.FC<{
         className={`relative w-full h-full bg-[var(--bg-card)] overflow-hidden transition-all duration-300 ease-[var(--ease-out-expo)] aspect-[2/3] border border-[var(--border-color)] shadow-md group-hover:scale-110 group-hover:shadow-2xl group-hover:border-[var(--text-main)] group-hover:z-50 ${readCount > 10 ? 'patina-sunbleach' : ''}`}
       >
         <PatinaOverlay readCount={readCount} />
-
         {coverUrl ? (
-          <img 
-            src={coverUrl} 
-            alt={book.title} 
-            className="w-full h-full object-cover grayscale-[0.2] contrast-[1.1] transition-all duration-1000 group-hover:grayscale-0"
-            loading={priority ? "eager" : "lazy"}
-          />
+          <img src={coverUrl} alt={book.title} className="w-full h-full object-cover grayscale-[0.2] contrast-[1.1] transition-all duration-1000 group-hover:grayscale-0" loading={priority ? "eager" : "lazy"} />
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center bg-[var(--bg-card)] p-4 border border-dashed border-[var(--border-color)]">
-            <span className="mono text-[10px] uppercase text-[var(--text-muted)] tracking-widest break-all text-center">
-                {book.title.slice(0, 4)}
-            </span>
+            <span className="mono text-[10px] uppercase text-[var(--text-muted)] tracking-widest break-all text-center">{book.title.slice(0, 4)}</span>
           </div>
         )}
-
         <div className={`absolute inset-0 bg-gradient-to-t from-[var(--bg-overlay)] via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 flex flex-col justify-end p-4 z-30`}>
              <h3 className="text-[var(--text-main)] font-medium text-sm leading-tight line-clamp-2 font-serif drop-shadow-md">{book.title}</h3>
         </div>
-
         {book.isFavorite && (
-            <div className="absolute top-2 right-2 text-[var(--accent)] drop-shadow-md z-30">
-                <Heart className="w-3 h-3 fill-current" />
-            </div>
+            <div className="absolute top-2 right-2 text-[var(--accent)] drop-shadow-md z-30"><Heart weight="fill" className="w-3 h-3 text-red-500" /></div>
         )}
-
         {showProgress && percentage > 0 && percentage < 100 && (
             <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-black/20 z-30">
                 <div className="h-full bg-[var(--accent)]" style={{ width: `${percentage}%` }} />
             </div>
         )}
-        
         <div className="absolute inset-0 bg-gradient-to-tr from-white/0 via-white/10 to-white/0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none mix-blend-overlay z-40" />
       </div>
     </div>
   );
 });
 
-// --- LibraryView Main ---
+// --- Main Library View ---
+
+type Tab = 'collections' | 'curations' | 'bookmarks';
 
 export const LibraryView: React.FC<LibraryViewProps> = ({ 
     books, onSelectBook, onUpdateBook, onGoHome, viewMode, enableSfx,
-    isSearchOpen, onToggleSearch
+    isSearchOpen, onToggleSearch, onContextMenu, playlists, onCreatePlaylist, onDeletePlaylist
 }) => {
+  const [activeTab, setActiveTab] = useState<Tab>('collections');
   const [search, setSearch] = useState('');
   const [currentPath, setCurrentPath] = useState<string>(''); 
   const [favoriteFolders, setFavoriteFolders] = useState<Set<string>>(new Set());
   const [editingBookId, setEditingBookId] = useState<string | null>(null);
-  const searchInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => { dbGetFavoriteFolders().then(folders => setFavoriteFolders(new Set(folders))); }, []);
   
-  // Focus search when opened
+  // Load Initial Data
+  useEffect(() => { 
+      dbGetFavoriteFolders().then(folders => setFavoriteFolders(new Set(folders))); 
+  }, []);
+
+  const searchInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
-      if (isSearchOpen && searchInputRef.current) {
-          searchInputRef.current.focus();
-      }
-      if (!isSearchOpen) {
-          setSearch('');
-      }
+      if (isSearchOpen && searchInputRef.current) searchInputRef.current.focus();
+      if (!isSearchOpen) setSearch('');
   }, [isSearchOpen]);
 
   const sortedBooks = useMemo(() => {
@@ -194,13 +164,10 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
     return filtered.sort((a, b) => naturalSort(a.title, b.title));
   }, [books, search]);
 
-  // Logic for category/folder view
   const { categorizedGroups, currentFolderBooks } = useMemo(() => {
     if (viewMode !== 'category') return { categorizedGroups: [], currentFolderBooks: sortedBooks };
-
     const groups: Record<string, Book[]> = {};
     const flatBooks: Book[] = [];
-    
     sortedBooks.forEach(book => {
         if (!book.path.startsWith(currentPath)) return;
         let relativePath = currentPath ? book.path.substring(currentPath.length + (currentPath ? 1 : 0)) : book.path;
@@ -212,111 +179,54 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
             groups[sub].push(book);
         }
     });
-
     const resultGroups = Object.keys(groups).sort(naturalSort).map(key => ({ 
-        title: key.replace(/[_-]/g, ' '), 
-        originalPath: currentPath ? `${currentPath}/${key}` : key, 
-        books: groups[key] 
+        title: key.replace(/[_-]/g, ' '), originalPath: currentPath ? `${currentPath}/${key}` : key, books: groups[key] 
     }));
-
     return { categorizedGroups: resultGroups, currentFolderBooks: flatBooks };
   }, [sortedBooks, currentPath, viewMode]);
 
-  const navigateToFolder = (folderName: string) => { 
-      if(enableSfx) playClickSfx();
-      setCurrentPath(folderName); 
-  };
-  const navigateUp = () => { 
-      if(enableSfx) playClickSfx();
-      if (!currentPath) return; 
-      setCurrentPath(currentPath.split('/').slice(0, -1).join('/')); 
-  };
+  const bookmarkedBooks = useMemo(() => books.filter(b => b.isFavorite), [books]);
 
-  // --- Render ---
+  // --- Render Sections ---
 
-  return (
-    <div className="flex flex-col h-full bg-[var(--bg-main)] transition-colors duration-700 relative">
-      
-      {/* Spotlight Search Floating Bar (Non-Blocking) */}
-      {isSearchOpen && (
-          <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[90] w-full max-w-2xl px-4 animate-in fade-in slide-in-from-top-4 duration-300">
-              <div className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl shadow-2xl flex items-center p-4 gap-4 ring-1 ring-[var(--text-main)]/10">
-                  <Search className="w-6 h-6 text-[var(--accent)]" />
-                  <input 
-                    ref={searchInputRef}
-                    type="text" 
-                    placeholder="Search collection..."
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    className="flex-1 bg-transparent text-xl font-serif text-[var(--text-main)] placeholder-[var(--text-muted)] focus:outline-none"
-                  />
-                  <button onClick={() => onToggleSearch(false)} className="p-2 text-[var(--text-muted)] hover:text-[var(--text-main)]">
-                      <X className="w-5 h-5" />
-                  </button>
-              </div>
-              {search && (
-                  <div className="mt-2 text-center pointer-events-none">
-                       <span className="bg-[var(--bg-overlay)] backdrop-blur px-3 py-1 rounded-full mono text-[10px] text-[var(--text-muted)] uppercase tracking-widest border border-[var(--border-color)]">
-                          {sortedBooks.length} results
-                       </span>
-                  </div>
-              )}
-          </div>
-      )}
-
-      {/* Header (Simplified) */}
-      <header className={`fixed top-0 left-0 right-0 z-40 px-8 py-6 flex items-center justify-between transition-transform duration-500 glass-panel border-b border-[var(--border-color)]`}>
-         <div className="flex items-center gap-6">
-            {!currentPath && (
-                <button onClick={onGoHome} className="mono text-xs uppercase tracking-widest text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors flex items-center gap-2">
-                    <Layout className="w-4 h-4" /> Collections
-                </button>
-            )}
-         </div>
-      </header>
-
-      <div className="flex-1 overflow-y-auto pb-32 pt-32 scroll-smooth">
+  const renderCollections = () => (
+      <div className="pb-32 pt-8">
           {viewMode === 'category' && !search ? (
               <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
                   <div className="px-8 mb-12">
                       {currentPath && (
                           <div className="flex items-baseline gap-4 mb-12">
-                             <button onClick={navigateUp} className="group flex items-center gap-2 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors">
-                                 <ChevronLeft className="w-4 h-4" />
+                             <button onClick={() => setCurrentPath(currentPath.split('/').slice(0, -1).join('/'))} className="group flex items-center gap-2 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors">
+                                 <CaretLeft className="w-4 h-4" />
                                  <span className="mono text-xs uppercase tracking-widest">Back</span>
                              </button>
                              <h1 className="text-4xl font-serif text-[var(--text-main)]">{currentPath.split('/').pop()?.replace(/[_-]/g, ' ')}</h1>
                           </div>
                       )}
                   </div>
-
                   {categorizedGroups.map((group) => (
                       <div key={group.originalPath} className="mb-12 px-8">
-                           <div 
-                                className="flex items-baseline gap-4 mb-6 cursor-pointer group border-b border-[var(--border-color)] pb-2"
-                                onClick={() => navigateToFolder(group.originalPath)}
-                           >
+                           <div className="flex items-baseline gap-4 mb-6 cursor-pointer group border-b border-[var(--border-color)] pb-2" onClick={() => setCurrentPath(group.originalPath)}>
                                 <h2 className="text-2xl font-serif text-[var(--text-main)] flex items-center gap-2">
-                                    <Folder className={`w-4 h-4 ${favoriteFolders.has(group.originalPath) ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`} />
+                                    <Folder weight={favoriteFolders.has(group.originalPath) ? "fill" : "regular"} className={`w-4 h-4 ${favoriteFolders.has(group.originalPath) ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`} />
                                     {group.title}
                                 </h2>
                                 <span className="mono text-[10px] text-[var(--text-muted)] opacity-0 group-hover:opacity-100 transition-opacity">Open Folder</span>
                            </div>
                            <div className="flex overflow-x-auto gap-6 pb-4 scrollbar-hide -mx-4 px-4 py-8">
                                {group.books.map(b => (
-                                   <BookCard key={b.id} book={b} width={180} height={270} onClick={() => onSelectBook(b.id)} onToggleFavorite={() => {}} onEdit={() => setEditingBookId(b.id)} />
+                                   <BookCard key={b.id} book={b} width={180} height={270} onClick={() => onSelectBook(b.id)} onContextMenu={(e) => onContextMenu(e, b)} />
                                ))}
                            </div>
                       </div>
                   ))}
-
                   {currentFolderBooks.length > 0 && (
                       <div className="px-8 mt-12">
                           <h2 className="mono text-xs text-[var(--text-muted)] uppercase tracking-widest mb-8">Items</h2>
                           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-x-8 gap-y-12">
                               {currentFolderBooks.map(book => (
                                   <div key={book.id} className="flex flex-col gap-3 group">
-                                      <BookCard book={book} width="100%" height="auto" onClick={() => onSelectBook(book.id)} onToggleFavorite={() => {}} onEdit={() => setEditingBookId(book.id)} />
+                                      <BookCard book={book} width="100%" height="auto" onClick={() => onSelectBook(book.id)} onContextMenu={(e) => onContextMenu(e, book)} />
                                       <p className="font-serif text-sm text-[var(--text-muted)] group-hover:text-[var(--text-main)] leading-tight">{book.title}</p>
                                   </div>
                               ))}
@@ -329,7 +239,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-x-8 gap-y-16">
                       {(search ? sortedBooks : currentFolderBooks).map(book => (
                           <div key={book.id} className="flex flex-col gap-3 group">
-                              <BookCard book={book} width="100%" height="auto" onClick={() => onSelectBook(book.id)} onToggleFavorite={() => {}} onEdit={() => setEditingBookId(book.id)} />
+                              <BookCard book={book} width="100%" height="auto" onClick={() => onSelectBook(book.id)} onContextMenu={(e) => onContextMenu(e, book)} />
                               <p className="font-serif text-sm text-[var(--text-muted)] group-hover:text-[var(--text-main)] leading-tight">{book.title}</p>
                           </div>
                       ))}
@@ -337,7 +247,91 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
               </div>
           )}
       </div>
+  );
+
+  const renderCurations = () => (
+      <div className="px-8 pt-8 pb-32 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <div className="flex items-center justify-between mb-8">
+              <h2 className="text-3xl font-serif text-[var(--text-main)]">Your Curations</h2>
+              <button onClick={onCreatePlaylist} className="flex items-center gap-2 px-4 py-2 bg-[var(--bg-card)] border border-[var(--border-color)] rounded-full hover:bg-[var(--text-main)] hover:text-[var(--bg-main)] transition-colors">
+                  <Plus className="w-4 h-4" /> <span className="mono text-xs uppercase">New Playlist</span>
+              </button>
+          </div>
+          <div className="space-y-12">
+              {playlists.map(pl => (
+                  <div key={pl.id} className="relative">
+                      <div className="flex items-center gap-4 mb-6 border-b border-[var(--border-color)] pb-2">
+                          <h3 className="text-xl font-serif">{pl.name}</h3>
+                          <span className="mono text-xs text-[var(--text-muted)]">{pl.bookIds.length} items</span>
+                          <button onClick={() => onDeletePlaylist(pl.id)} className="ml-auto text-red-500 hover:text-red-400"><Trash className="w-4 h-4"/></button>
+                      </div>
+                      <div className="flex overflow-x-auto gap-6 pb-4 scrollbar-hide -mx-4 px-4">
+                          {pl.bookIds.length === 0 && <div className="text-[var(--text-muted)] italic px-4">Empty playlist</div>}
+                          {pl.bookIds.map(id => {
+                              const b = books.find(book => book.id === id);
+                              if (!b) return null;
+                              return <BookCard key={b.id} book={b} width={160} height={240} onClick={() => onSelectBook(b.id)} onContextMenu={(e) => onContextMenu(e, b)} />;
+                          })}
+                      </div>
+                  </div>
+              ))}
+          </div>
+      </div>
+  );
+
+  const renderBookmarks = () => (
+      <div className="px-8 pt-8 pb-32 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <h2 className="text-3xl font-serif text-[var(--text-main)] mb-8">Favorites</h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-x-8 gap-y-12">
+               {bookmarkedBooks.map(book => (
+                  <div key={book.id} className="flex flex-col gap-3 group">
+                      <BookCard book={book} width="100%" height="auto" onClick={() => onSelectBook(book.id)} onContextMenu={(e) => onContextMenu(e, book)} />
+                      <p className="font-serif text-sm text-[var(--text-muted)] group-hover:text-[var(--text-main)] leading-tight">{book.title}</p>
+                  </div>
+               ))}
+               {bookmarkedBooks.length === 0 && <p className="text-[var(--text-muted)]">No favorites yet.</p>}
+          </div>
+      </div>
+  );
+
+  return (
+    <div className="flex flex-col h-full bg-[var(--bg-main)] transition-colors duration-700 relative">
       
+      {/* Search Overlay */}
+      {isSearchOpen && (
+          <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[90] w-full max-w-2xl px-4 animate-in fade-in slide-in-from-top-4 duration-300">
+              <div className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl shadow-2xl flex items-center p-4 gap-4 ring-1 ring-[var(--text-main)]/10">
+                  <MagnifyingGlass className="w-6 h-6 text-[var(--accent)]" />
+                  <input ref={searchInputRef} type="text" placeholder="Search..." value={search} onChange={(e) => setSearch(e.target.value)} className="flex-1 bg-transparent text-xl font-serif text-[var(--text-main)] placeholder-[var(--text-muted)] focus:outline-none" />
+                  <button onClick={() => onToggleSearch(false)}><X className="w-5 h-5 text-[var(--text-muted)]" /></button>
+              </div>
+          </div>
+      )}
+
+      {/* Header with Tabs */}
+      <header className={`fixed top-0 left-0 right-0 z-40 h-24 flex items-center justify-between px-8 glass-panel border-b border-[var(--border-color)]`}>
+         <div className="flex items-center gap-6">
+            <button onClick={onGoHome} className="mono text-xs uppercase tracking-widest text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors flex items-center gap-2">
+                <Layout className="w-4 h-4" /> Home
+            </button>
+         </div>
+
+         {/* Central Tabs */}
+         <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-8">
+             <button onClick={() => { setActiveTab('collections'); if(enableSfx) playClickSfx(); }} className={`text-sm font-serif transition-colors ${activeTab === 'collections' ? 'text-[var(--text-main)] border-b border-[var(--accent)] pb-1' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}>Collections</button>
+             <button onClick={() => { setActiveTab('curations'); if(enableSfx) playClickSfx(); }} className={`text-sm font-serif transition-colors ${activeTab === 'curations' ? 'text-[var(--text-main)] border-b border-[var(--accent)] pb-1' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}>Curations</button>
+             <button onClick={() => { setActiveTab('bookmarks'); if(enableSfx) playClickSfx(); }} className={`text-sm font-serif transition-colors ${activeTab === 'bookmarks' ? 'text-[var(--text-main)] border-b border-[var(--accent)] pb-1' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}>Favorites</button>
+         </div>
+
+         <div className="w-24"></div> 
+      </header>
+
+      <div className="flex-1 overflow-y-auto pt-24 scroll-smooth">
+          {activeTab === 'collections' && renderCollections()}
+          {activeTab === 'curations' && renderCurations()}
+          {activeTab === 'bookmarks' && renderBookmarks()}
+      </div>
+
       {editingBookId && books.find(b => b.id === editingBookId) && (
           <EditBookModal book={books.find(b => b.id === editingBookId)!} isOpen={true} onClose={() => setEditingBookId(null)} onSave={onUpdateBook} />
       )}

@@ -1,5 +1,6 @@
+
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
-import { Book, BookMetadata, Library, ReadingProgress, FileHandle, Page, ReaderSettings, Bookmark } from '../types';
+import { Book, BookMetadata, Library, ReadingProgress, FileHandle, Page, ReaderSettings, Bookmark, Playlist } from '../types';
 
 interface SakuraDB extends DBSchema {
   libraries: {
@@ -38,6 +39,10 @@ interface SakuraDB extends DBSchema {
       value: Bookmark;
       indexes: { 'by-book': string };
   };
+  playlists: {
+      key: string;
+      value: Playlist;
+  };
   settings: {
     key: string;
     value: { key: string; value: any };
@@ -45,7 +50,7 @@ interface SakuraDB extends DBSchema {
 }
 
 const DB_NAME = 'sakura-db';
-const DB_VERSION = 3; 
+const DB_VERSION = 4; // Incremented for Playlists
 
 let dbPromise: Promise<IDBPDatabase<SakuraDB>> | null = null;
 
@@ -91,14 +96,19 @@ export const initDB = () => {
         }
         if (!progressStore.indexNames.contains('by-last-read')) progressStore.createIndex('by-last-read', 'lastReadAt');
 
-        // 5. Bookmarks Store (New in V3)
+        // 5. Bookmarks Store
         let bookmarkStore;
         if (!db.objectStoreNames.contains('bookmarks')) {
             bookmarkStore = db.createObjectStore('bookmarks', { keyPath: 'id' });
             bookmarkStore.createIndex('by-book', 'bookId');
         }
 
-        // 6. Settings Store
+        // 6. Playlists Store (New)
+        if (!db.objectStoreNames.contains('playlists')) {
+            db.createObjectStore('playlists', { keyPath: 'id' });
+        }
+
+        // 7. Settings Store
         if (!db.objectStoreNames.contains('settings')) {
           db.createObjectStore('settings', { keyPath: 'key' });
         }
@@ -233,6 +243,53 @@ export const dbGetBookmarksForBook = async (bookId: string): Promise<number[]> =
     const db = await getDB();
     const bookmarks = await db.getAllFromIndex('bookmarks', 'by-book', bookId);
     return bookmarks.map(b => b.pageIndex);
+};
+
+export const dbGetAllBookmarks = async (): Promise<Bookmark[]> => {
+    const db = await getDB();
+    return db.getAll('bookmarks');
+};
+
+// --- Playlists ---
+
+export const dbCreatePlaylist = async (name: string): Promise<Playlist> => {
+    const db = await getDB();
+    const playlist: Playlist = {
+        id: crypto.randomUUID(),
+        name,
+        bookIds: [],
+        createdAt: Date.now()
+    };
+    await db.put('playlists', playlist);
+    return playlist;
+};
+
+export const dbGetPlaylists = async (): Promise<Playlist[]> => {
+    const db = await getDB();
+    return db.getAll('playlists');
+};
+
+export const dbAddBookToPlaylist = async (playlistId: string, bookId: string) => {
+    const db = await getDB();
+    const playlist = await db.get('playlists', playlistId);
+    if (playlist && !playlist.bookIds.includes(bookId)) {
+        playlist.bookIds.push(bookId);
+        await db.put('playlists', playlist);
+    }
+};
+
+export const dbRemoveBookFromPlaylist = async (playlistId: string, bookId: string) => {
+    const db = await getDB();
+    const playlist = await db.get('playlists', playlistId);
+    if (playlist) {
+        playlist.bookIds = playlist.bookIds.filter(id => id !== bookId);
+        await db.put('playlists', playlist);
+    }
+};
+
+export const dbDeletePlaylist = async (playlistId: string) => {
+    const db = await getDB();
+    await db.delete('playlists', playlistId);
 };
 
 // --- Settings ---
