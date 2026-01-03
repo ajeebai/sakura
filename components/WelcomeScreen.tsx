@@ -3,6 +3,7 @@ import { Flower, FolderOpen } from 'lucide-react';
 
 interface WelcomeScreenProps {
   onOpenLibrary: () => void;
+  onDropFiles: (data: DataTransfer) => void;
   isLoading: boolean;
   loadingMessage: string;
   isBrowserSupported: boolean;
@@ -10,9 +11,9 @@ interface WelcomeScreenProps {
 
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ 
     onOpenLibrary, 
+    onDropFiles,
     isLoading, 
     loadingMessage,
-    // isBrowserSupported is now effectively unused visually but kept for prop compat
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   
@@ -28,7 +29,9 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    onOpenLibrary(); 
+    if (e.dataTransfer) {
+        onDropFiles(e.dataTransfer);
+    }
   };
 
   return (

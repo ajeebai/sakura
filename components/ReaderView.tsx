@@ -179,8 +179,11 @@ export const ReaderView: React.FC<ReaderViewProps> = ({ book, onClose, onUpdateP
           resetTransform(); // Reset Zoom on page turn
       } else if (isSlideshowActive) {
           setIsSlideshowActive(false);
+      } else if (direction === 'prev' && next < 0) {
+          // Explicit "Previous" at start of book closes it (Mobile UX)
+          onClose();
       }
-  }, [currentPage, totalPages, settings.direction, settings.viewMode, isSlideshowActive, resetTransform]);
+  }, [currentPage, totalPages, settings.direction, settings.viewMode, isSlideshowActive, resetTransform, onClose]);
 
   // --- Direct DOM Transform Updater ---
   const updateContentTransform = () => {
@@ -304,6 +307,32 @@ export const ReaderView: React.FC<ReaderViewProps> = ({ book, onClose, onUpdateP
       }
   };
 
+  // --- Touch Gestures (Swipe to Close) ---
+  const touchStart = useRef<{x: number, y: number} | null>(null);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+      if (e.touches.length === 1) {
+          touchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+      if (!touchStart.current || transform.current.scale > 1) return;
+      
+      const touchEnd = { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+      const deltaX = touchEnd.x - touchStart.current.x;
+      const deltaY = touchEnd.y - touchStart.current.y;
+
+      // Detect Edge Swipe (Swipe Right from Left Edge)
+      const isEdgeSwipe = touchStart.current.x < 50 && deltaX > 80 && Math.abs(deltaY) < 60;
+      
+      if (isEdgeSwipe) {
+          onClose();
+      }
+      
+      touchStart.current = null;
+  };
+
   // --- Keyboard ---
   useEffect(() => {
       const handleKey = (e: KeyboardEvent) => {
@@ -378,6 +407,8 @@ export const ReaderView: React.FC<ReaderViewProps> = ({ book, onClose, onUpdateP
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
     >
       
       {/* Zen Mode Ambient Background */}
@@ -393,7 +424,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({ book, onClose, onUpdateP
       )}
 
       {/* Top Controls */}
-      <div className={`absolute top-0 left-0 right-0 h-16 bg-gradient-to-b from-black/80 to-transparent flex items-center justify-between px-6 z-30 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+      <div className={`absolute top-0 left-0 right-0 h-16 bg-gradient-to-b from-black/80 to-transparent flex items-center justify-between px-6 z-30 transition-all duration-300 ${showControls ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-full pointer-events-none'}`}>
         <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full text-white/90 backdrop-blur-md border border-white/5">
             <ArrowLeft className="w-5 h-5" />
         </button>
@@ -402,11 +433,15 @@ export const ReaderView: React.FC<ReaderViewProps> = ({ book, onClose, onUpdateP
              <button onClick={() => toggleBookmark(currentPage)} className={`p-2 rounded-full backdrop-blur-md border transition-all ${bookmarks.has(currentPage) ? 'bg-[var(--accent)] text-white border-[var(--accent)]' : 'hover:bg-white/10 text-white/90 border-white/10'}`}>
                  <Heart className={`w-5 h-5 ${bookmarks.has(currentPage) ? 'fill-current' : ''}`} />
              </button>
-
-             <span className="text-white/80 font-mono text-xs bg-black/40 px-2 py-1 rounded backdrop-blur-md border border-white/5">
-                 {currentPage + 1} / {totalPages}
-             </span>
              
+             <button onClick={() => setIsSlideshowActive(!isSlideshowActive)} className={`p-2 rounded-full backdrop-blur-md border transition-all ${isSlideshowActive ? 'bg-[var(--accent)] text-white border-[var(--accent)]' : 'hover:bg-white/10 text-white/90 border-white/10'}`}>
+                {isSlideshowActive ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current" />}
+            </button>
+
+             <button onClick={toggleFullscreen} className="p-2 rounded-full hover:bg-white/10 text-white/90 backdrop-blur-md border border-white/10">
+                {isFullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+             </button>
+
              <button onClick={() => setShowSettingsPanel(!showSettingsPanel)} className={`p-2 rounded-full backdrop-blur-md border transition-all ${showSettingsPanel ? 'bg-white text-black border-white' : 'hover:bg-white/10 text-white/90 border-white/10'}`}>
                 <Settings2 className="w-5 h-5" />
              </button>
@@ -536,40 +571,44 @@ export const ReaderView: React.FC<ReaderViewProps> = ({ book, onClose, onUpdateP
           )}
       </div>
 
-      {/* Bottom Controls */}
-      <div className={`absolute bottom-8 left-0 right-0 flex justify-center z-30 transition-all duration-300 transform ${showControls ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0 pointer-events-none'}`}>
-         <div className="bg-black/60 backdrop-blur-xl border border-white/10 rounded-full px-6 py-3 flex items-center space-x-6 shadow-2xl">
-            <button onClick={() => setIsSlideshowActive(!isSlideshowActive)} className={`p-2 rounded-full transition-colors ${isSlideshowActive ? 'bg-[var(--accent)] text-white' : 'text-white/80 hover:text-white'}`}>
-                {isSlideshowActive ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current" />}
-            </button>
+      {/* Bottom Scrubber (Redesigned) */}
+      <div className={`absolute bottom-0 left-0 right-0 px-6 py-8 z-30 transition-all duration-300 transform ${showControls ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0 pointer-events-none'}`}>
+         {/* Scrubber Container */}
+         <div className="relative group w-full max-w-3xl mx-auto">
+             
+             {/* Page Number Bubble (Floating above thumb) */}
+             <div className="absolute bottom-full left-0 right-0 mb-4 flex justify-center pointer-events-none">
+                 <span className="bg-black/60 backdrop-blur-md border border-white/10 text-white font-mono text-xs px-3 py-1 rounded-full shadow-lg">
+                    {currentPage + 1} / {totalPages}
+                 </span>
+             </div>
 
-            <div className="w-px h-4 bg-white/20" />
-
-            <button onClick={() => settings.direction === 'LTR' ? navigate('prev') : navigate('next')} className="text-white/80 hover:text-white">
-                <ChevronLeft className="w-6 h-6" />
-            </button>
-
-            <input 
-              type="range" min={0} max={totalPages - 1} value={currentPage}
-              onChange={(e) => {
-                  const val = parseInt(e.target.value);
-                  setCurrentPage(val);
-                  if (settings.viewMode === 'vertical' && pageRefs.current[val]) {
-                      pageRefs.current[val]?.scrollIntoView();
-                  }
-              }}
-              className="w-32 md:w-48 h-1 bg-white/20 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full hover:[&::-webkit-slider-thumb]:scale-125 transition-all"
-            />
-            
-            <button onClick={() => settings.direction === 'LTR' ? navigate('next') : navigate('prev')} className="text-white/80 hover:text-white">
-                <ChevronRight className="w-6 h-6" />
-            </button>
-
-            <div className="w-px h-4 bg-white/20 mx-2" />
-
-            <button onClick={toggleFullscreen} className="text-white/80 hover:text-white">
-                {isFullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
-            </button>
+             {/* The Track */}
+             <div className="relative h-12 flex items-center">
+                 <input 
+                    type="range" 
+                    min={0} 
+                    max={totalPages - 1} 
+                    value={currentPage}
+                    onChange={(e) => {
+                        const val = parseInt(e.target.value);
+                        setCurrentPage(val);
+                        if (settings.viewMode === 'vertical' && pageRefs.current[val]) {
+                            pageRefs.current[val]?.scrollIntoView();
+                        }
+                    }}
+                    className="w-full h-2 bg-white/20 rounded-full appearance-none cursor-pointer focus:outline-none 
+                        [&::-webkit-slider-thumb]:appearance-none 
+                        [&::-webkit-slider-thumb]:w-4 
+                        [&::-webkit-slider-thumb]:h-4 
+                        [&::-webkit-slider-thumb]:bg-white 
+                        [&::-webkit-slider-thumb]:rounded-full 
+                        [&::-webkit-slider-thumb]:shadow-[0_0_10px_rgba(255,255,255,0.5)]
+                        [&::-webkit-slider-thumb]:transition-transform
+                        hover:[&::-webkit-slider-thumb]:scale-125
+                        active:[&::-webkit-slider-thumb]:scale-150"
+                 />
+             </div>
          </div>
       </div>
     </div>

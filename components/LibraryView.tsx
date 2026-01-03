@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { Book, LibraryViewMode, SortOption } from '../types';
-import { generateThumbnail } from '../utils/imageUtils';
+import { generateThumbnail, generatePdfThumbnail, generateArchiveThumbnail } from '../utils/imageUtils';
 import { dbUpdateBook, dbGetFavoriteFolders, dbToggleFavoriteFolder } from '../services/db';
-import { Search, BookOpen, Heart, MoreHorizontal, ChevronLeft, ChevronRight, LayoutGrid, List, ArrowDownAZ, Calendar, Clock, Play, History, Shuffle, Folder, Home, Star } from 'lucide-react';
+import { Search, BookOpen, Heart, MoreHorizontal, ChevronLeft, ChevronRight, LayoutGrid, List, ArrowDownAZ, Calendar, Clock, Play, History, Shuffle, Folder, Home, Star, Layout, Palette } from 'lucide-react';
 import { EditBookModal } from './EditBookModal';
 import { naturalSort } from '../utils/fileUtils';
 
@@ -10,6 +10,8 @@ interface LibraryViewProps {
   books: Book[];
   onSelectBook: (bookId: string) => void;
   onUpdateBook: (bookId: string, changes: Partial<Book>) => void;
+  onGoHome: () => void;
+  onToggleTheme: () => void;
 }
 
 // --- Book Card ---
@@ -31,20 +33,25 @@ const BookCard: React.FC<{
     let active = true;
 
     const loadCover = async () => {
+      // 1. If we already have a cached blob, use it
       if (book.coverImage) {
         const url = URL.createObjectURL(book.coverImage);
         if (active) setCoverUrl(url);
         return; 
       }
 
+      // 2. Generate from Cover Handle (for Folders)
       if (book.coverHandle) {
         try {
             const file = await book.coverHandle.getFile();
-            if (file.size < 20 * 1024 * 1024) {
+            if (file.size < 20 * 1024 * 1024) { // Limit size for performance
                  const thumbnailBlob = await generateThumbnail(file);
+                 
+                 // Persist to DB
                  await dbUpdateBook({
                     ...book,
                     coverImage: thumbnailBlob,
+                    // Strip runtime handles before saving to 'items' store
                     handle: undefined, pages: undefined, coverHandle: undefined, readingProgress: undefined 
                 } as any);
                 
@@ -53,13 +60,43 @@ const BookCard: React.FC<{
             }
         } catch (e) { /* silent */ }
       }
+      
+      // 3. Generate from Main Handle (for PDF / Archive)
+      else if (book.handle && (book.format === 'pdf' || book.format === 'archive')) {
+         try {
+             // We need to cast because in some contexts book.handle might be DirectoryHandle, but here we know it's a file for pdf/archive
+             const file = await (book.handle as any).getFile();
+             let thumbnailBlob: Blob | null = null;
+
+             if (book.format === 'pdf') {
+                 thumbnailBlob = await generatePdfThumbnail(file);
+             } else if (book.format === 'archive') {
+                 thumbnailBlob = await generateArchiveThumbnail(file);
+             }
+
+             if (thumbnailBlob) {
+                 await dbUpdateBook({
+                    ...book,
+                    coverImage: thumbnailBlob,
+                    handle: undefined, pages: undefined, coverHandle: undefined, readingProgress: undefined 
+                 } as any);
+                 
+                 const url = URL.createObjectURL(thumbnailBlob);
+                 if (active) setCoverUrl(url);
+             }
+         } catch (e) {
+             // console.warn("Failed to generate thumb for single file book", book.title, e);
+         }
+      }
     };
+    
     loadCover();
+    
     return () => { 
         active = false;
         if (coverUrl) URL.revokeObjectURL(coverUrl);
     };
-  }, [book.id, book.coverImage, book.coverHandle]); 
+  }, [book.id, book.coverImage, book.coverHandle, book.handle, book.format]); 
 
   const progress = book.readingProgress;
   const percentage = progress?.percentage || 0;
@@ -148,6 +185,15 @@ const HeroSection: React.FC<{ book: Book; onRead: () => void; onShuffle: () => v
              book.coverHandle.getFile().then(f => generateThumbnail(f, 600)).then(blob => {
                  setCoverUrl(URL.createObjectURL(blob));
              }).catch(() => {});
+        } else if (book.handle && (book.format === 'pdf' || book.format === 'archive')) {
+            // Lazy load for hero too
+            (book.handle as any).getFile().then(async (f: File) => {
+                 if (book.format === 'pdf') return generatePdfThumbnail(f, 600);
+                 if (book.format === 'archive') return generateArchiveThumbnail(f, 600);
+                 throw new Error('Unsupported');
+            }).then(blob => {
+                 setCoverUrl(URL.createObjectURL(blob));
+            }).catch(() => {});
         }
     }, [book]);
 
@@ -317,7 +363,7 @@ const CategoryRow: React.FC<{
     );
 };
 
-export const LibraryView: React.FC<LibraryViewProps> = ({ books, onSelectBook, onUpdateBook }) => {
+export const LibraryView: React.FC<LibraryViewProps> = ({ books, onSelectBook, onUpdateBook, onGoHome, onToggleTheme }) => {
   const [search, setSearch] = useState('');
   const [showHeader, setShowHeader] = useState(true);
   const [viewMode, setViewMode] = useState<LibraryViewMode>('category');
@@ -474,26 +520,39 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ books, onSelectBook, o
       <header 
         className={`absolute top-0 left-0 right-0 z-30 px-8 py-6 flex flex-col md:flex-row items-start md:items-center justify-between transition-transform duration-500 ease-out-expo ${showHeader ? 'translate-y-0' : '-translate-y-full'} bg-gradient-to-b from-[var(--bg-main)] to-transparent pointer-events-auto`}
       >
-         {/* Breadcrumbs / Search */}
+         {/* Navigation / Breadcrumbs / Search */}
          <div className="flex flex-col gap-4 w-full max-w-xl">
             {/* Search */}
-            <div className="relative group w-full transition-opacity duration-300">
-                <div className={`absolute inset-0 bg-[var(--bg-overlay)] backdrop-blur-md rounded-full border border-[var(--border-color)] shadow-sm transition-all duration-300 ${search ? 'ring-1 ring-[var(--accent)]' : ''}`} />
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)] z-10" />
-                <input 
-                    type="text"
-                    placeholder="Search collection..."
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    className="relative z-10 w-full bg-transparent border-none rounded-full py-2.5 pl-12 pr-4 text-sm text-[var(--text-main)] focus:outline-none placeholder:text-[var(--text-muted)] font-serif tracking-wide"
-                />
+            <div className="flex items-center gap-3">
+                {/* Back to Collections (only if at root) */}
+                {!currentPath && (
+                    <button 
+                        onClick={onGoHome}
+                        className="p-2.5 rounded-full bg-[var(--bg-card)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors shadow-sm"
+                        title="Back to Collections"
+                    >
+                        <Layout className="w-5 h-5" />
+                    </button>
+                )}
+                
+                <div className="relative group w-full transition-opacity duration-300">
+                    <div className={`absolute inset-0 bg-[var(--bg-overlay)] backdrop-blur-md rounded-full border border-[var(--border-color)] shadow-sm transition-all duration-300 ${search ? 'ring-1 ring-[var(--accent)]' : ''}`} />
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)] z-10" />
+                    <input 
+                        type="text"
+                        placeholder="Search collection..."
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        className="relative z-10 w-full bg-transparent border-none rounded-full py-2.5 pl-12 pr-4 text-sm text-[var(--text-main)] focus:outline-none placeholder:text-[var(--text-muted)] font-serif tracking-wide"
+                    />
+                </div>
             </div>
 
             {/* Breadcrumbs */}
             {!search && currentPath && (
                 <div className="flex items-center gap-2 text-sm text-[var(--text-muted)] overflow-x-auto scrollbar-hide">
                     <button onClick={() => navigateToBreadcrumb(-1)} className="hover:text-[var(--accent)] transition-colors flex items-center gap-1">
-                        <Home className="w-3 h-3" /> Home
+                        <Home className="w-3 h-3" /> Root
                     </button>
                     {currentPath.split('/').map((part, idx) => (
                         <React.Fragment key={idx}>
@@ -519,6 +578,9 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ books, onSelectBook, o
              <div className="flex items-center space-x-1 px-1">
                 <button onClick={() => setViewMode('category')} className={`p-1.5 rounded-lg ${viewMode === 'category' ? 'bg-[var(--bg-card)] text-[var(--text-main)]' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}><List className="w-4 h-4" /></button>
                 <button onClick={() => setViewMode('grid')} className={`p-1.5 rounded-lg ${viewMode === 'grid' ? 'bg-[var(--bg-card)] text-[var(--text-main)]' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}><LayoutGrid className="w-4 h-4" /></button>
+             </div>
+             <div className="border-l border-[var(--border-color)] pl-1">
+                 <button onClick={onToggleTheme} className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-main)]"><Palette className="w-4 h-4" /></button>
              </div>
          </div>
       </header>

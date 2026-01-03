@@ -1,38 +1,46 @@
 import React from 'react';
 import { Library } from '../types';
-import { FolderHeart, Plus, Trash2, HardDrive } from 'lucide-react';
+import { FolderHeart, Plus, Trash2, HardDrive, Palette } from 'lucide-react';
 
 interface LibraryListProps {
   libraries: Library[];
   onSelectLibrary: (lib: Library) => void;
   onAddLibrary: () => void;
   onDeleteLibrary: (id: string) => void;
+  onToggleTheme: () => void;
 }
 
 export const LibraryList: React.FC<LibraryListProps> = ({ 
   libraries, 
   onSelectLibrary, 
   onAddLibrary, 
-  onDeleteLibrary 
+  onDeleteLibrary,
+  onToggleTheme
 }) => {
   return (
-    <div className="h-full overflow-y-auto bg-[var(--bg-main)] flex flex-col items-center p-10 transition-colors duration-300">
+    <div className="h-full overflow-y-auto bg-[var(--bg-main)] flex flex-col items-center p-6 md:p-10 transition-colors duration-300">
       <div className="w-full max-w-4xl space-y-10 mt-10">
-        <div className="text-left border-b border-[var(--border-color)] pb-6">
-          <h1 className="text-3xl font-serif text-[var(--text-main)]">Collections</h1>
-          <p className="text-[var(--text-muted)] mt-1">Manage your local library folders.</p>
+        <div className="flex items-end justify-between border-b border-[var(--border-color)] pb-6">
+          <div className="text-left">
+             <h1 className="text-3xl font-serif text-[var(--text-main)]">Collections</h1>
+             <p className="text-[var(--text-muted)] mt-1">Manage your local library folders.</p>
+          </div>
+          <button 
+             onClick={onToggleTheme}
+             className="p-2 text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--bg-card)] rounded-full transition-colors mb-1"
+          >
+             <Palette className="w-5 h-5" />
+          </button>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {libraries.map((lib) => (
             <div 
               key={lib.id}
-              className="group relative bg-[var(--bg-card)] border border-[var(--border-color)] rounded-xl p-6 hover:shadow-lg hover:border-[var(--accent)] transition-all duration-300 flex flex-col"
+              className="group relative bg-[var(--bg-card)] border border-[var(--border-color)] rounded-xl p-6 hover:shadow-lg hover:border-[var(--accent)] transition-all duration-300 flex flex-col cursor-pointer"
+              onClick={() => onSelectLibrary(lib)}
             >
-              <div 
-                className="cursor-pointer flex-1 flex flex-col space-y-4"
-                onClick={() => onSelectLibrary(lib)}
-              >
+              <div className="flex-1 flex flex-col space-y-4">
                 <div className="flex items-start justify-between">
                     <div className="p-3 bg-[var(--bg-main)] rounded-lg transition-colors group-hover:text-[var(--accent)]">
                         <FolderHeart className="w-8 h-8 text-[var(--text-muted)] group-hover:text-[var(--accent)]" />

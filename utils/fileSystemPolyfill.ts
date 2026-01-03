@@ -27,8 +27,84 @@ export interface LegacyScanResult {
   handles: { id: string; handle: any; coverHandle: any; pages?: Page[] }[];
 }
 
-export const processLegacyFileList = async (fileList: FileList): Promise<LegacyScanResult> => {
-  const files = Array.from(fileList);
+/**
+ * Recursively reads a DirectoryEntry (Firefox/Safari DnD API)
+ * and returns a flat list of Files with their paths patched.
+ */
+export const scanFilesFromDataTransfer = async (items: DataTransferItemList): Promise<File[]> => {
+    const files: File[] = [];
+    const queue: { entry: any; path: string }[] = [];
+
+    // 1. Initial items
+    for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.kind === 'file') {
+            const entry = item.webkitGetAsEntry();
+            if (entry) {
+                queue.push({ entry, path: '' });
+            }
+        }
+    }
+
+    // 2. Process Queue
+    while (queue.length > 0) {
+        const { entry, path } = queue.shift()!;
+        
+        if (entry.isFile) {
+            await new Promise<void>((resolve) => {
+                entry.file((f: File) => {
+                    // Critical: Firefox drops don't have webkitRelativePath set.
+                    // We must patch it so processLegacyFileList can group them.
+                    const fullPath = path + f.name;
+                    Object.defineProperty(f, 'webkitRelativePath', {
+                        value: fullPath,
+                        writable: true
+                    });
+                    files.push(f);
+                    resolve();
+                }, (err: any) => {
+                    console.warn("Failed to read file entry", err);
+                    resolve(); 
+                });
+            });
+        } else if (entry.isDirectory) {
+            const reader = entry.createReader();
+            const newPath = path + entry.name + '/';
+            
+            // readEntries might not return all files in one go, need to loop until empty
+            const readAllEntries = async () => {
+                let entries: any[] = [];
+                let keepReading = true;
+                while (keepReading) {
+                    await new Promise<void>((resolve) => {
+                        reader.readEntries((results: any[]) => {
+                            if (results.length === 0) {
+                                keepReading = false;
+                            } else {
+                                entries = entries.concat(results);
+                            }
+                            resolve();
+                        }, () => {
+                            keepReading = false;
+                            resolve();
+                        });
+                    });
+                }
+                return entries;
+            };
+
+            const subEntries = await readAllEntries();
+            subEntries.forEach((sub: any) => {
+                queue.push({ entry: sub, path: newPath });
+            });
+        }
+    }
+
+    return files;
+};
+
+export const processLegacyFileList = async (fileList: FileList | File[]): Promise<LegacyScanResult> => {
+  const files = Array.isArray(fileList) ? fileList : Array.from(fileList);
   if (files.length === 0) throw new Error("No files selected");
 
   // Group by directory

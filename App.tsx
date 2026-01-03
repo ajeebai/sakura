@@ -9,7 +9,7 @@ import { AppState, Library, BookMetadata, ReadingProgress, Theme } from './types
 import { LibraryScanner } from './services/libraryScanner';
 import { initDB, dbGetLibraries, dbAddLibrary, dbDeleteLibrary, dbGetBooksForLibrary, dbGetAllProgress, dbUpdateBook, dbSaveProgress, dbGetSetting, dbSaveSetting, dbAddItem, getDB } from './services/db';
 import { hydrateBook, verifyPermission } from './services/fileSystem';
-import { processLegacyFileList } from './utils/fileSystemPolyfill';
+import { processLegacyFileList, scanFilesFromDataTransfer } from './utils/fileSystemPolyfill';
 
 const SakuraApp: React.FC = () => {
   const [state, setState] = useState<AppState>({
@@ -85,57 +85,60 @@ const SakuraApp: React.FC = () => {
 
     // Check for native support
     if ('showDirectoryPicker' in window) {
-      await addLibraryNative();
+        try {
+            const dirHandle = await (window as any).showDirectoryPicker({ mode: 'read' });
+            await processNativeHandle(dirHandle);
+        } catch (err: any) {
+            if (err.name !== 'AbortError') console.error(err);
+        }
     } else {
       // Trigger legacy input
       legacyInputRef.current?.click();
     }
   };
 
-  const addLibraryNative = async () => {
+  const processNativeHandle = async (dirHandle: any) => {
     try {
-      const dirHandle = await (window as any).showDirectoryPicker({
-        mode: 'read'
-      });
-      
-      const libraryId = crypto.randomUUID();
-      const newLibrary: Library = {
-        id: libraryId,
-        name: dirHandle.name,
-        handle: dirHandle,
-        addedAt: Date.now()
-      };
+        const libraryId = crypto.randomUUID();
+        const newLibrary: Library = {
+            id: libraryId,
+            name: dirHandle.name,
+            handle: dirHandle,
+            addedAt: Date.now()
+        };
 
-      await dbAddLibrary(newLibrary);
+        await dbAddLibrary(newLibrary);
 
-      setState(prev => ({ ...prev, loading: true, loadingMessage: 'Scanning library...' }));
-      const scanner = new LibraryScanner();
-      await scanner.scan(libraryId, dirHandle, (msg) => {
-        setState(prev => ({ ...prev, loadingMessage: msg }));
-      });
-      scanner.terminate();
+        setState(prev => ({ ...prev, loading: true, loadingMessage: 'Scanning library...' }));
+        const scanner = new LibraryScanner();
+        await scanner.scan(libraryId, dirHandle, (msg) => {
+            setState(prev => ({ ...prev, loadingMessage: msg }));
+        });
+        scanner.terminate();
 
-      const updatedLibs = await refreshLibraries();
-      await handleSelectLibrary(newLibrary);
-      
-      setState(prev => ({ ...prev, libraries: updatedLibs }));
-
-    } catch (err: any) {
-      if (err.name !== 'AbortError') console.error(err);
-      setState(prev => ({ ...prev, loading: false, loadingMessage: '' }));
+        const updatedLibs = await refreshLibraries();
+        await handleSelectLibrary(newLibrary);
+        
+        setState(prev => ({ ...prev, libraries: updatedLibs }));
+    } catch (err) {
+        console.error("Native import failed", err);
+        setState(prev => ({ ...prev, loading: false, loadingMessage: '' }));
     }
   };
 
   const handleLegacyFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
-    
+    await processLegacyFiles(Array.from(e.target.files));
+    if (legacyInputRef.current) legacyInputRef.current.value = '';
+  };
+
+  const processLegacyFiles = async (files: File[]) => {
     setState(prev => ({ ...prev, loading: true, loadingMessage: 'Importing files...' }));
     
     try {
-        const result = await processLegacyFileList(e.target.files);
+        const result = await processLegacyFileList(files);
         
         // Save Library
-        // Note: For legacy, 'handle' is null or dummy because we can't persist the folder reference
         const libraryId = result.books[0]?.libraryId || crypto.randomUUID();
         const newLibrary: Library = {
             id: libraryId,
@@ -146,7 +149,7 @@ const SakuraApp: React.FC = () => {
         
         await dbAddLibrary(newLibrary);
 
-        // Save Books & Handles manually (bypassing scanner worker)
+        // Save Books & Handles manually
         const db = await getDB();
         const tx = db.transaction(['items', 'handles'], 'readwrite');
         const itemStore = tx.objectStore('items');
@@ -169,9 +172,44 @@ const SakuraApp: React.FC = () => {
         alert("Failed to import library. " + (e as any).message);
         setState(prev => ({ ...prev, loading: false, loadingMessage: '' }));
     }
-    
-    // Reset input
-    if (legacyInputRef.current) legacyInputRef.current.value = '';
+  };
+
+  // --- Smart Drop Handler (Handles both Chrome Handles and Firefox/Legacy Entries) ---
+  const handleDropFiles = async (dataTransfer: DataTransfer) => {
+      if (state.libraries.length >= 5) {
+        alert("You have reached the maximum of 5 libraries.");
+        return;
+      }
+
+      // Strategy 1: Modern File System Access API (Chrome/Edge)
+      const items = dataTransfer.items;
+      if (items && items.length > 0 && 'getAsFileSystemHandle' in items[0]) {
+          try {
+             // Just grab the first directory dropped
+             for (let i = 0; i < items.length; i++) {
+                 const handle = await (items[i] as any).getAsFileSystemHandle();
+                 if (handle && handle.kind === 'directory') {
+                     await processNativeHandle(handle);
+                     return;
+                 }
+             }
+          } catch (e) { console.warn("Native drag-drop failed, trying legacy...", e); }
+      }
+
+      // Strategy 2: WebKit Entry API (Firefox / Safari / Fallback)
+      // This requires scanning the directory entry to build a flat file list
+      try {
+          setState(prev => ({ ...prev, loading: true, loadingMessage: 'Scanning dropped folder...' }));
+          const files = await scanFilesFromDataTransfer(items);
+          if (files.length > 0) {
+              await processLegacyFiles(files);
+          } else {
+              setState(prev => ({ ...prev, loading: false, loadingMessage: '' }));
+          }
+      } catch (e) {
+          console.error("Drop scan failed", e);
+          setState(prev => ({ ...prev, loading: false, loadingMessage: '' }));
+      }
   };
 
   const handleSelectLibrary = async (library: Library) => {
@@ -344,10 +382,11 @@ const SakuraApp: React.FC = () => {
                 {...{ webkitdirectory: "", directory: "" } as any}
             />
             <WelcomeScreen 
-              onOpenLibrary={handleAddLibrary} 
+              onOpenLibrary={handleAddLibrary}
+              onDropFiles={handleDropFiles}
               isLoading={state.loading}
               loadingMessage={state.loadingMessage}
-              isBrowserSupported={true} // Always true now thanks to fallback
+              isBrowserSupported={true} 
             />
         </>
     );
@@ -387,6 +426,7 @@ const SakuraApp: React.FC = () => {
                   onAddLibrary={handleAddLibrary}
                   onSelectLibrary={handleSelectLibrary}
                   onDeleteLibrary={handleDeleteLibrary}
+                  onToggleTheme={handleToggleTheme}
                 />
             )}
             
@@ -395,6 +435,8 @@ const SakuraApp: React.FC = () => {
                   books={state.libraryBooks} 
                   onSelectBook={handleSelectBook} 
                   onUpdateBook={handleUpdateBook}
+                  onGoHome={handleGoHome}
+                  onToggleTheme={handleToggleTheme}
                 />
             )}
         </AppShell>
