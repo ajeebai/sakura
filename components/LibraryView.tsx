@@ -1,9 +1,10 @@
 
+
 import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { Book, LibraryViewMode, Playlist, BookMetadata, FileHandle, Page, Bookmark } from '../types';
 import { generateThumbnail } from '../utils/imageUtils';
 import { dbUpdateBook, dbGetFavoriteFolders, dbGetPlaylists, dbCreatePlaylist, dbAddBookToPlaylist, dbDeletePlaylist, dbGetAllBookmarks, dbGetBooksForLibrary, dbGetAllProgress } from '../services/db';
-import { Search, Heart, ChevronLeft, Folder, X, Plus, MoreVertical, Trash2, FolderHeart, Sparkles, Bookmark as BookmarkIcon, Home } from 'lucide-react';
+import { Search, Heart, ChevronLeft, Folder, X, Plus, MoreVertical, Trash2, FolderHeart, Sparkles, Bookmark as BookmarkIcon, Home, BookOpen } from 'lucide-react';
 import { CurationModal } from './CurationModal';
 import { naturalSort } from '../utils/fileUtils';
 import { playClickSfx, playHoverSfx } from '../services/audio';
@@ -182,9 +183,8 @@ const BookmarkThumbnail: React.FC<{ book: Book; pageIndex: number; onClick: () =
                 ) : (
                     <div className="w-full h-full flex items-center justify-center"><div className="w-6 h-6 rounded-full border border-t-[var(--accent)] animate-spin"/></div>
                 )}
-                <div className="absolute top-2 right-2 text-red-500 z-10 drop-shadow-md">
-                     <BookmarkIcon className="w-5 h-5 fill-current" strokeWidth={1} />
-                </div>
+                {/* Corner Fold Indicator */}
+                <div className="corner-fold scale-75"></div>
             </div>
              <div className="flex flex-col">
                 <p className="font-medium text-sm text-[var(--text-main)] leading-tight truncate">{book.title}</p>
@@ -283,12 +283,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   };
 
   const handleOpenBookmark = (book: Book, pageIndex: number) => {
-      // We need to set the book's progress to the bookmark page
-      // But we don't want to persist this jump as "Reading Progress" immediately until they read.
-      // For simplicity, we just update the book state in memory to start at that page.
-      // However, ReaderView uses `readingProgress.currentPageIndex` or 0.
-      
-      // We'll create a transient copy of the book with modified progress
+      // Just jump to that page in the book
       const transientBook = {
           ...book,
           readingProgress: {
@@ -296,12 +291,35 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
               currentPageIndex: pageIndex
           }
       };
-      // We can't just pass this to onOpenVirtualBook, we need to pass it to the main reader
-      // The main reader state takes ID. 
-      // A trick is to update the DB progress *before* opening.
       dbUpdateBook({ ...book, readingProgress: transientBook.readingProgress } as any).then(() => {
           onSelectBook(book.id);
       });
+  };
+
+  const handleReadCollectedMoments = () => {
+      const validBookmarks = rawBookmarks.filter(bm => books.some(b => b.id === bm.bookId));
+      if (validBookmarks.length === 0) return;
+
+      const pages: Page[] = [];
+      validBookmarks.forEach(bm => {
+          const book = books.find(b => b.id === bm.bookId);
+          if (book && book.pages[bm.pageIndex]) {
+              pages.push(book.pages[bm.pageIndex]);
+          }
+      });
+
+      const virtualBook: Book = {
+          id: 'collected-moments',
+          title: 'Collected Moments',
+          path: 'virtual/bookmarks',
+          pageCount: pages.length,
+          addedAt: Date.now(),
+          pages: pages,
+          handle: { kind: 'directory', name: 'bookmarks' } as any,
+          coverHandle: null
+      };
+
+      onOpenVirtualBook(virtualBook);
   };
 
   // --- Render Sections ---
@@ -330,7 +348,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                                 </h2>
                                 <span className="text-[10px] text-[var(--text-muted)] opacity-0 group-hover:opacity-100 transition-opacity tracking-widest uppercase">Open Folder</span>
                            </div>
-                           <div className="flex overflow-x-auto gap-8 pb-8 scrollbar-hide -mx-2 px-2">
+                           <div className="flex overflow-x-auto gap-8 pb-8 scrollbar-hide -mx-2 px-2 mask-fade-edges">
                                {group.books.map(b => (
                                    <BookCard key={b.id} book={b} width={200} height={300} onClick={() => onSelectBook(b.id)} onContextMenu={handleContextMenu} />
                                ))}
@@ -383,7 +401,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                       </h3>
                       <span className="text-xs text-[var(--text-muted)]">{favoriteBooks.length}</span>
                   </div>
-                  <div className="flex overflow-x-auto gap-8 pb-4 scrollbar-hide -mx-2 px-2">
+                  <div className="flex overflow-x-auto gap-8 pb-4 scrollbar-hide -mx-2 px-2 mask-fade-edges">
                       {favoriteBooks.length === 0 && <div className="text-[var(--text-muted)] italic px-2 text-sm">No favorites yet.</div>}
                       {favoriteBooks.map(b => (
                           <BookCard key={b.id} book={b} width={180} height={270} onClick={() => onSelectBook(b.id)} onContextMenu={handleContextMenu} />
@@ -401,7 +419,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                           <span className="text-xs text-[var(--text-muted)]">{pl.bookIds.length}</span>
                           <button onClick={() => handleDeletePlaylist(pl.id)} className="ml-auto text-red-500 hover:text-red-400 opacity-30 hover:opacity-100 transition-opacity"><Trash2 className="w-4 h-4" strokeWidth={1}/></button>
                       </div>
-                      <div className="flex overflow-x-auto gap-8 pb-4 scrollbar-hide -mx-2 px-2">
+                      <div className="flex overflow-x-auto gap-8 pb-4 scrollbar-hide -mx-2 px-2 mask-fade-edges">
                           {pl.bookIds.map(id => {
                               const b = books.find(book => book.id === id);
                               if (!b) return null;
@@ -420,7 +438,20 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
 
       return (
         <div className="px-12 md:px-20 pt-40 pb-40 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <h2 className="text-2xl font-semibold text-[var(--text-main)] mb-12 tracking-tight">Bookmarks</h2>
+            <div className="flex items-center justify-between mb-12">
+                <h2 className="text-2xl font-semibold text-[var(--text-main)] tracking-tight">Bookmarks</h2>
+                
+                {validBookmarks.length > 0 && (
+                    <button 
+                        onClick={handleReadCollectedMoments}
+                        className="flex items-center gap-2 px-6 py-3 bg-[var(--text-main)] text-[var(--bg-main)] rounded-full hover:scale-105 transition-transform shadow-lg"
+                    >
+                        <BookOpen className="w-4 h-4" /> 
+                        <span className="text-xs font-bold uppercase tracking-wide">Read Collected Moments</span>
+                    </button>
+                )}
+            </div>
+            
             {validBookmarks.length === 0 ? (
                  <div className="text-[var(--text-muted)] italic text-sm">No bookmarks yet. Right click in reader to add one.</div>
             ) : (
@@ -458,7 +489,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       )}
 
       {/* FLOATING PILL NAVIGATION (Replaces stiff header) */}
-      <div className="fixed top-8 left-1/2 -translate-x-1/2 z-40 flex items-center justify-center pointer-events-none">
+      <div className="fixed top-8 left-1/2 -translate-x-1/2 z-[100] flex items-center justify-center pointer-events-none">
           <div className="glass-panel p-1.5 rounded-full flex items-center gap-2 pointer-events-auto shadow-[var(--shadow-zen)]">
              
              {/* Home Button */}

@@ -31,7 +31,7 @@ const SakuraApp: React.FC = () => {
   const [settings, setSettings] = useState<ReaderSettings>({
       direction: 'LTR', fitMode: 'contain', viewMode: 'vertical', 
       slideshowInterval: 3, smartSplit: false,
-      enableSfx: true, textureMode: 'paper', transitionMode: 'snap',
+      enableSfx: true, textureMode: 'washi', transitionMode: 'snap',
       atmosphere: 'none', lightingMode: 'ambient'
   });
   const [libViewMode, setLibViewMode] = useState<LibraryViewMode>('category');

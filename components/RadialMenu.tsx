@@ -1,11 +1,12 @@
 
+
 import React, { useState, useEffect, useRef } from 'react';
 import { 
     Palette, Layers, Grid, List, Sun, Zap, ArrowLeft, Search, 
     BookOpen, Sparkles, Heart, FolderHeart, 
-    Book, Scroll, Bookmark, Moon, Eye, Lightbulb, Monitor
+    Book, Scroll, Bookmark, Moon, Eye, Monitor, Cloud, ArrowRight, MoveHorizontal, ArrowUp
 } from 'lucide-react';
-import { Theme, ReaderSettings, LibraryViewMode, ViewState, LightingMode } from '../types';
+import { Theme, ReaderSettings, LibraryViewMode, ViewState } from '../types';
 import { playClickSfx, playHoverSfx } from '../services/audio';
 
 interface RadialMenuProps {
@@ -40,6 +41,12 @@ interface MenuItem {
     action: () => void;
     submenu?: MenuItem[];
 }
+
+const SakuraIcon = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 100 100" className={className} fill="currentColor">
+    <path d="M50 35 C40 10, 10 30, 20 50 C10 70, 40 90, 50 65 C60 90, 90 70, 80 50 C90 30, 60 10, 50 35 Z" />
+  </svg>
+);
 
 export const RadialMenu: React.FC<RadialMenuProps> = ({
     currentView,
@@ -102,7 +109,7 @@ export const RadialMenu: React.FC<RadialMenuProps> = ({
 
         // Root Level Generation
         const themes: Theme[] = ['zen-dark', 'zen-light'];
-        const textures = ['none', 'paper', 'washi', 'halftone', 'canvas', 'stipple', 'linen'];
+        const textures = ['none', 'washi', 'halftone'];
 
         const lightingMenu: MenuItem = {
             id: 'lighting',
@@ -114,9 +121,7 @@ export const RadialMenu: React.FC<RadialMenuProps> = ({
                 { id: 'l-spotlight', icon: <Zap className="w-5 h-5" strokeWidth={1}/>, label: 'Spotlight', action: () => onSettingChange('lightingMode', 'spotlight') },
                 { id: 'l-immersive', icon: <Eye className="w-5 h-5" strokeWidth={1}/>, label: 'Immersive', action: () => onSettingChange('lightingMode', 'immersive') },
                 { id: 'l-dim', icon: <Moon className="w-5 h-5" strokeWidth={1}/>, label: 'Dim', action: () => onSettingChange('lightingMode', 'dim') },
-                { id: 'l-midnight', icon: <Moon className="w-5 h-5 fill-current" strokeWidth={1}/>, label: 'Midnight', action: () => onSettingChange('lightingMode', 'midnight') },
-                { id: 'l-cinema', icon: <Monitor className="w-5 h-5" strokeWidth={1}/>, label: 'Cinema', action: () => onSettingChange('lightingMode', 'cinema') },
-                { id: 'l-paper', icon: <Book className="w-5 h-5" strokeWidth={1}/>, label: 'Paper', action: () => onSettingChange('lightingMode', 'paper') },
+                { id: 'l-dream', icon: <Cloud className="w-5 h-5" strokeWidth={1}/>, label: 'Dream', action: () => onSettingChange('lightingMode', 'dream') },
             ]
         };
 
@@ -175,22 +180,29 @@ export const RadialMenu: React.FC<RadialMenuProps> = ({
                  },
                  {
                     id: 'reader-mode',
-                    icon: settings.viewMode === 'vertical' ? <Scroll className="w-5 h-5" strokeWidth={1}/> : <BookOpen className="w-5 h-5" strokeWidth={1}/>,
+                    icon: settings.viewMode === 'vertical' || settings.viewMode === 'seamless' ? <Scroll className="w-5 h-5" strokeWidth={1}/> : <BookOpen className="w-5 h-5" strokeWidth={1}/>,
                     label: `View: ${settings.viewMode}`,
                     action: () => {}, // Submenu trigger
                     submenu: [
                         { id: 'm-single', icon: <Book className="w-5 h-5" strokeWidth={1}/>, label: 'Single', action: () => onSettingChange('viewMode', 'single') },
                         { id: 'm-spread', icon: <BookOpen className="w-5 h-5" strokeWidth={1}/>, label: 'Spread', action: () => onSettingChange('viewMode', 'spread') },
                         { id: 'm-vert', icon: <Scroll className="w-5 h-5" strokeWidth={1}/>, label: 'Vertical', action: () => onSettingChange('viewMode', 'vertical') },
+                        { id: 'm-seamless', icon: <ArrowUp className="w-5 h-5" strokeWidth={1}/>, label: 'Seamless', action: () => onSettingChange('viewMode', 'seamless') },
                         { id: 'm-grid', icon: <Grid className="w-5 h-5" strokeWidth={1}/>, label: 'Grid', action: () => onSettingChange('viewMode', 'grid') },
                     ]
                  },
+                 {
+                    id: 'direction',
+                    icon: settings.direction === 'LTR' ? <ArrowRight className="w-5 h-5" strokeWidth={1} /> : <ArrowLeft className="w-5 h-5" strokeWidth={1} />,
+                    label: settings.direction,
+                    action: () => onSettingChange('direction', settings.direction === 'LTR' ? 'RTL' : 'LTR')
+                 },
                  lightingMenu,
-                 ...commonItems.filter(i => i.id !== 'lighting') // Avoid duplicate lighting
+                 ...commonItems.filter(i => i.id !== 'lighting')
              ];
 
-             // Only show transitions if NOT vertical/grid
-             if (settings.viewMode !== 'vertical' && settings.viewMode !== 'grid') {
+             // Only show transitions if NOT vertical/grid/seamless
+             if (settings.viewMode === 'single' || settings.viewMode === 'spread') {
                  items.splice(3, 0, {
                      id: 'transition',
                      icon: <Sparkles className="w-5 h-5" strokeWidth={1} />,
@@ -254,12 +266,12 @@ export const RadialMenu: React.FC<RadialMenuProps> = ({
             {/* Center Hub - Glass Pill */}
             <button
                 onClick={handleCenterClick}
-                className="absolute -translate-x-1/2 -translate-y-1/2 w-16 h-16 glass-panel rounded-full flex items-center justify-center z-20 hover:scale-105 transition-transform group"
+                className="absolute -translate-x-1/2 -translate-y-1/2 w-16 h-16 glass-panel rounded-full flex items-center justify-center z-20 hover:scale-105 transition-transform group text-[var(--text-main)]"
             >
                 {menuStack.length > 0 ? (
-                    <ArrowLeft className="w-6 h-6 text-[var(--text-main)]" strokeWidth={1} />
+                    <ArrowLeft className="w-6 h-6" strokeWidth={1} />
                 ) : (
-                    <div className="w-2 h-2 bg-[var(--text-main)] rounded-full animate-pulse" />
+                    <SakuraIcon className="w-8 h-8" />
                 )}
             </button>
 

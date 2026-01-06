@@ -1,8 +1,9 @@
 
+
 import React, { useEffect, useState, useCallback, useRef, useImperativeHandle, forwardRef } from 'react';
 import { Book, FileHandle, ReaderSettings } from '../types';
 import { getFileUrl } from '../services/fileSystem';
-import { Bookmark as BookmarkIcon, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import * as pdfjsLibProxy from 'pdfjs-dist';
 import { playClickSfx, playPageTurnSfx, playThumpSfx } from '../services/audio';
 import { dbAddBookmark, dbRemoveBookmark, dbGetBookmarksForBook } from '../services/db';
@@ -43,8 +44,6 @@ const PdfPage: React.FC<{ pdfDoc: any; pageIndex: number; isActive: boolean; cla
                 const viewport = page.getViewport({ scale: 2 }); // High res for zoom
                 const canvas = canvasRef.current!;
                 
-                // Avoid canvas memory limit crashes by limiting max dimensions if needed
-                // For now, standard resizing
                 canvas.width = viewport.width;
                 canvas.height = viewport.height;
                 
@@ -67,7 +66,6 @@ const PdfPage: React.FC<{ pdfDoc: any; pageIndex: number; isActive: boolean; cla
                 renderTaskRef.current.cancel(); 
                 renderTaskRef.current = null;
             }
-            // Clear canvas to free memory immediately
             if (canvasRef.current) {
                 canvasRef.current.width = 1;
                 canvasRef.current.height = 1;
@@ -78,11 +76,37 @@ const PdfPage: React.FC<{ pdfDoc: any; pageIndex: number; isActive: boolean; cla
     return <canvas ref={canvasRef} className={`bg-white shadow-sm pointer-events-none ${className}`} style={{ width: '100%', height: 'auto' }} />;
 });
 
-const LazyImagePage: React.FC<{ handle: FileHandle; isActive: boolean; alt: string; className?: string; style?: React.CSSProperties; onLoad?: (url: string) => void }> = React.memo(({ handle, isActive, alt, className, style, onLoad }) => {
+// Lazy Image Page with Optional IntersectionObserver Support
+const LazyImagePage: React.FC<{ 
+    handle: FileHandle; 
+    isActive: boolean; 
+    alt: string; 
+    className?: string; 
+    style?: React.CSSProperties; 
+    onLoad?: (url: string) => void;
+    useObserver?: boolean;
+}> = React.memo(({ handle, isActive, alt, className, style, onLoad, useObserver = false }) => {
     const [src, setSrc] = useState<string | null>(null);
+    const [isIntersecting, setIsIntersecting] = useState(false);
+    const ref = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        if (!isActive) { 
+        if (!useObserver) return;
+        
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                setIsIntersecting(entry.isIntersecting);
+            });
+        }, { rootMargin: '400px' }); // Larger margin for seamless loading
+
+        if (ref.current) observer.observe(ref.current);
+        return () => observer.disconnect();
+    }, [useObserver]);
+
+    const shouldLoad = useObserver ? isIntersecting : isActive;
+
+    useEffect(() => {
+        if (!shouldLoad) { 
             if(src) { 
                 URL.revokeObjectURL(src); 
                 setSrc(null); 
@@ -103,7 +127,7 @@ const LazyImagePage: React.FC<{ handle: FileHandle; isActive: boolean; alt: stri
         return () => { 
             active = false; 
         };
-    }, [handle, isActive]);
+    }, [handle, shouldLoad]);
 
     // Cleanup on unmount
     useEffect(() => {
@@ -111,6 +135,21 @@ const LazyImagePage: React.FC<{ handle: FileHandle; isActive: boolean; alt: stri
             if (src) URL.revokeObjectURL(src);
         };
     }, [src]);
+
+    // If using observer, we need a wrapper div to observe
+    if (useObserver) {
+        return (
+            <div ref={ref} className={`relative flex items-center justify-center ${className}`} style={style}>
+                 {src ? (
+                     <img src={src} alt={alt} className="w-full h-auto pointer-events-none select-none block" loading="lazy" decoding="async" />
+                 ) : (
+                     <div className="w-full h-[50vh] flex items-center justify-center">
+                         <div className="w-8 h-8 rounded-full border-2 border-t-[var(--accent)] animate-spin"/>
+                     </div>
+                 )}
+            </div>
+        );
+    }
 
     if (!src) return <div className="w-full h-full flex items-center justify-center text-[var(--text-muted)] bg-[var(--bg-card)]/10"><div className="w-8 h-8 rounded-full border-2 border-t-[var(--accent)] animate-spin"/></div>;
     return <img src={src} alt={alt} className={`${className} pointer-events-none select-none`} style={style} loading="eager" decoding="async" />;
@@ -138,8 +177,6 @@ const ThumbnailScrubber: React.FC<{
             {/* Drawer */}
             <div className={`w-28 glass-panel border-r-0 rounded-r-2xl my-4 ml-0 transition-all duration-300 ease-[var(--ease-out-expo)] overflow-y-auto overflow-x-hidden scrollbar-hide flex flex-col items-center py-6 gap-4 absolute left-0 top-0 bottom-0 ${isHovered ? 'translate-x-0 opacity-100 shadow-[var(--shadow-zen)]' : '-translate-x-full opacity-0'}`}>
                 {pages.map((p, idx) => {
-                    // Only render thumbnails close to current page OR if the drawer is hovered
-                    // This saves massive memory
                     const shouldRender = isHovered && Math.abs(currentPage - idx) < 20;
 
                     return (
@@ -267,8 +304,8 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(({
   }, []);
 
   const navigate = useCallback((direction: 'next' | 'prev') => {
-      if (settings.viewMode === 'vertical' || settings.viewMode === 'grid') {
-          // For vertical, we ideally scroll. But if keyboard used, we can jump pages.
+      if (settings.viewMode === 'vertical' || settings.viewMode === 'grid' || settings.viewMode === 'seamless') {
+          // For vertical modes, we rely on scroll but can jump.
           let delta = direction === 'next' ? 1 : -1;
           const next = Math.min(Math.max(0, currentPage + delta), totalPages - 1);
           setCurrentPage(next);
@@ -279,12 +316,20 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(({
       }
       
       const isSpread = settings.viewMode === 'spread';
-      let delta = settings.direction === 'LTR' ? 1 : -1;
-      if (direction === 'prev') delta *= -1;
       
+      // Handle RTL/LTR Logic
+      let delta = 1;
+      if (direction === 'prev') delta = -1;
+      
+      // If RTL, 'next' means decreasing index, 'prev' means increasing index
+      if (settings.direction === 'RTL') delta *= -1;
+
       if (isSpread) {
-         if (direction === 'next') delta = (currentPage === 0) ? 1 : (delta * 2); 
+         if (direction === 'next') delta = (currentPage === 0) ? (settings.direction === 'RTL' ? -1 : 1) : (delta * 2); 
          else delta = (currentPage === 1) ? -1 : (delta * 2);
+         // Simplified logic for spread is tricky with RTL, let's keep it robust:
+         // If Spread LTR: 0 -> 1/2 -> 3/4
+         // If Spread RTL: 0 -> 1/2 -> 3/4 (But displayed flipped). The index sequence is the same, just display order changes.
       }
 
       const next = currentPage + delta;
@@ -316,9 +361,19 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(({
   useEffect(() => {
       const handleKeyDown = (e: KeyboardEvent) => {
           if (e.key === 'ArrowLeft') {
-              navigate(settings.direction === 'LTR' ? 'prev' : 'next');
+              navigate('prev'); // Arrow Left visually moves Left. In LTR that's prev. In RTL that's next?
+              // Standard expectation: Left Arrow = Go to previous page (lower index) usually, but in RTL books Left Arrow = Go to next page (higher index).
+              // Let's align with visual direction.
+              // If LTR: Left Arrow -> Prev Page.
+              // If RTL: Left Arrow -> Next Page.
+              // navigate('prev') handles the logic based on settings.direction if we pass visual intent?
+              // Actually navigate takes 'next'/'prev' logical.
+              // Let's explicit check:
+              if (settings.direction === 'LTR') navigate('prev');
+              else navigate('next');
           } else if (e.key === 'ArrowRight') {
-              navigate(settings.direction === 'LTR' ? 'next' : 'prev');
+              if (settings.direction === 'LTR') navigate('next');
+              else navigate('prev');
           } else if (e.key === 'Escape') {
               onClose();
           }
@@ -354,14 +409,14 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(({
       }
       
       // 3. PAGE TURN (Vertical scroll when NOT zoomed)
-      if (settings.viewMode !== 'vertical' && settings.viewMode !== 'grid') {
+      if (settings.viewMode !== 'vertical' && settings.viewMode !== 'grid' && settings.viewMode !== 'seamless') {
           if (Math.abs(e.deltaY) > 30) {
              if (wheelTimeout.current) return;
              
              const isNext = e.deltaY > 0;
              const isPrev = e.deltaY < 0;
 
-             if (isNext) navigate(settings.direction === 'LTR' ? 'next' : 'prev');
+             if (isNext) navigate(settings.direction === 'LTR' ? 'next' : 'prev'); // Scroll down = Next
              if (isPrev) navigate(settings.direction === 'LTR' ? 'prev' : 'next');
 
              wheelTimeout.current = setTimeout(() => { wheelTimeout.current = null; }, 500);
@@ -392,7 +447,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(({
       return style;
   };
 
-  const renderContent = (idx: number, active: boolean) => {
+  const renderContent = (idx: number, active: boolean, vertical: boolean = false) => {
       if (idx >= totalPages) return <div className="w-full h-full bg-transparent" />;
       const isMarked = bookmarks.has(idx);
       
@@ -407,13 +462,17 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(({
               {isPdf ? (
                   <PdfPage pdfDoc={pdfDoc} pageIndex={idx + 1} isActive={active} className="shadow-2xl max-h-screen max-w-full object-contain" />
               ) : (
-                  <LazyImagePage handle={book.pages[idx].handle} isActive={active} alt={`Page ${idx}`} style={getImageStyle()} onLoad={handleImageLoad} />
+                  <LazyImagePage 
+                      handle={book.pages[idx].handle} 
+                      isActive={active} 
+                      alt={`Page ${idx}`} 
+                      style={vertical ? { maxWidth: '100%', height: 'auto', display: 'block' } : getImageStyle()} 
+                      onLoad={handleImageLoad}
+                      useObserver={vertical} // Use IntersectionObserver for Vertical/Seamless mode
+                  />
               )}
               {isMarked && (
-                  <div className="absolute top-0 right-8 w-8 h-12 bg-red-600 shadow-lg z-20 flex items-end justify-center pb-2 animate-in fade-in slide-in-from-top-4 duration-300">
-                      <BookmarkIcon className="w-4 h-4 text-white fill-current" />
-                      <div className="absolute -bottom-4 left-0 w-0 h-0 border-l-[16px] border-l-red-600 border-r-[16px] border-r-red-600 border-b-[16px] border-b-transparent"></div>
-                  </div>
+                  <div className="corner-fold" title="Bookmarked"></div>
               )}
           </div>
       );
@@ -421,8 +480,6 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(({
 
   const getTransitionClass = () => {
       if (!isTransitioning || settings.transitionMode === 'none') return '';
-      // Map modes to CSS classes defined in index.html
-      // .fx-snap-enter, .fx-smooth-enter, etc.
       const mode = settings.transitionMode;
       return `fx-${mode}-${transitionPhase}`;
   };
@@ -466,13 +523,13 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(({
               <>
                 <div 
                     className="absolute top-0 bottom-0 left-0 w-[15%] z-40 cursor-w-resize"
-                    onClick={(e) => { e.stopPropagation(); navigate('prev'); }}
-                    title="Previous Page"
+                    onClick={(e) => { e.stopPropagation(); navigate(settings.direction === 'LTR' ? 'prev' : 'next'); }}
+                    title="Previous"
                 />
                 <div 
                     className="absolute top-0 bottom-0 right-0 w-[15%] z-40 cursor-e-resize"
-                    onClick={(e) => { e.stopPropagation(); navigate('next'); }}
-                    title="Next Page"
+                    onClick={(e) => { e.stopPropagation(); navigate(settings.direction === 'LTR' ? 'next' : 'prev'); }}
+                    title="Next"
                 />
               </>
           )}
@@ -490,7 +547,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(({
                         className={`relative aspect-[2/3] bg-[var(--bg-card)] cursor-pointer group rounded overflow-hidden border ${currentPage === idx ? 'border-[var(--accent)]' : 'border-[var(--border-color)] hover:border-[var(--text-main)]'}`}
                       >
                          {Math.abs(currentPage - idx) < 20 && renderContent(idx, true)}
-                         {bookmarks.has(idx) && <div className="absolute top-2 right-2 text-red-500"><BookmarkIcon className="w-4 h-4 fill-current"/></div>}
+                         {bookmarks.has(idx) && <div className="corner-fold scale-50"></div>}
                          <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-[10px] p-1 text-center opacity-0 group-hover:opacity-100">
                              {idx + 1}
                          </div>
@@ -499,25 +556,52 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(({
               </div>
           )}
 
-          {/* VERTICAL MODE */}
-          {settings.viewMode === 'vertical' && (
-              <div className="w-full h-full overflow-y-auto" onScroll={(e) => {
-                 const el = e.target as HTMLElement;
-                 const index = Math.min(totalPages - 1, Math.max(0, Math.floor((el.scrollTop / el.scrollHeight) * totalPages)));
-                 if (Math.abs(index - currentPage) > 0) setCurrentPage(index);
-              }}>
-                 {Array.from({ length: totalPages }).map((_, idx) => (
-                    <div key={idx} data-index={idx} className="page-container flex justify-center mb-8 min-h-[50vh]">
-                       {Math.abs(currentPage - idx) < 3 && renderContent(idx, true)}
-                    </div>
-                 ))}
-                 {showStamp && (
-                    <div className="flex justify-center pb-24">
-                        <div className="hanko-seal w-48 h-48 rounded-full border-4 border-red-800 flex flex-col items-center justify-center text-red-800 rotate-[-15deg] backdrop-blur-sm bg-red-50/10">
-                             <span className="text-4xl font-serif font-bold">READ</span>
-                        </div>
-                    </div>
-                 )}
+          {/* VERTICAL / SEAMLESS MODE */}
+          {(settings.viewMode === 'vertical' || settings.viewMode === 'seamless') && (
+              <div 
+                className="w-full h-full overflow-hidden relative"
+                onScroll={(e) => {
+                     // Only track scroll if native scroll is active (zoom == 1)
+                     if (scaleDisplay <= 1) {
+                         const el = e.target as HTMLElement;
+                         // Rough approximation of current page based on scroll pos
+                         const index = Math.min(totalPages - 1, Math.max(0, Math.floor((el.scrollTop / el.scrollHeight) * totalPages)));
+                         if (Math.abs(index - currentPage) > 0) setCurrentPage(index);
+                     }
+                }}
+              >
+                  {/* Scroll Container (Native) */}
+                  <div 
+                     className="w-full h-full overflow-y-auto overflow-x-hidden"
+                     style={{ 
+                         overflowY: scaleDisplay > 1 ? 'hidden' : 'auto', 
+                     }}
+                  >
+                       {/* Transform Container (Zoom) */}
+                       <div 
+                          ref={contentRef} 
+                          className="w-full min-h-full flex flex-col items-center" 
+                          style={{ transformOrigin: 'top center' }}
+                       >
+                             {Array.from({ length: totalPages }).map((_, idx) => (
+                                <div 
+                                    key={idx} 
+                                    data-index={idx} 
+                                    className={`w-full max-w-4xl flex justify-center ${settings.viewMode === 'seamless' ? 'mb-0' : 'mb-8 min-h-[50vh]'}`}
+                                >
+                                   {/* Vertical = true enables observer */}
+                                   {renderContent(idx, true, true)}
+                                </div>
+                             ))}
+                             {showStamp && (
+                                <div className="flex justify-center pb-24 pt-12">
+                                    <div className="hanko-seal w-48 h-48 rounded-full border-4 border-red-800 flex flex-col items-center justify-center text-red-800 rotate-[-15deg] backdrop-blur-sm bg-red-50/10">
+                                         <span className="text-4xl font-serif font-bold">READ</span>
+                                    </div>
+                                </div>
+                             )}
+                       </div>
+                  </div>
               </div>
           )}
 

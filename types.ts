@@ -1,4 +1,5 @@
 
+
 // --- File System Types ---
 export interface FileHandle extends FileSystemFileHandle {
   readonly kind: 'file';
@@ -114,12 +115,13 @@ export interface AppState {
 export type ReadingDirection = 'LTR' | 'RTL';
 export type ImageFitMode = 'contain' | 'width' | 'height' | 'original';
 
-export type LightingMode = 'ambient' | 'spotlight' | 'immersive' | 'dim' | 'midnight' | 'cinema' | 'paper';
+export type LightingMode = 'ambient' | 'spotlight' | 'immersive' | 'dim' | 'dream';
 
 export interface ReaderSettings {
     direction: ReadingDirection;
     fitMode: ImageFitMode;
-    viewMode: 'single' | 'vertical' | 'spread' | 'grid'; 
+    // Added 'seamless' (Webtoon) mode
+    viewMode: 'single' | 'vertical' | 'spread' | 'grid' | 'seamless'; 
     slideshowInterval: number; // seconds
     smartSplit: boolean; 
     
@@ -129,6 +131,6 @@ export interface ReaderSettings {
     lightingMode: LightingMode;
     
     // UPDATED TEXTURES & TRANSITIONS
-    textureMode: 'none' | 'paper' | 'washi' | 'halftone' | 'canvas' | 'stipple' | 'linen';
+    textureMode: 'none' | 'washi' | 'halftone';
     transitionMode: 'none' | 'snap' | 'smooth' | 'fade';
 }
