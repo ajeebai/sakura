@@ -7,13 +7,12 @@ import { LibraryList } from './components/LibraryList';
 import { AppShell } from './components/AppShell';
 import { RadialMenu } from './components/RadialMenu';
 import { CurationModal } from './components/CurationModal';
-import { ErrorBoundary } from './components/ErrorBoundary';
 import { AppState, Library, BookMetadata, ReadingProgress, Theme, ReaderSettings, LibraryViewMode, Book, Playlist } from './types';
 import { LibraryScanner } from './services/libraryScanner';
 import { initDB, dbGetLibraries, dbAddLibrary, dbDeleteLibrary, dbGetBooksForLibrary, dbGetAllProgress, dbUpdateBook, dbSaveProgress, dbGetSetting, dbSaveSetting, dbGetReaderSettings, dbSaveReaderSettings, dbGetPlaylists, dbAddBookToPlaylist, dbCreatePlaylist } from './services/db';
 import { hydrateBook, verifyPermission } from './services/fileSystem';
 import { processLegacyFileList, scanFilesFromDataTransfer } from './utils/fileSystemPolyfill';
-import { playClickSfx, playHoverSfx, setAtmosphere } from './services/audio';
+import { playClickSfx, setAtmosphere } from './services/audio';
 
 const SakuraApp: React.FC = () => {
   const [state, setState] = useState<AppState>({
@@ -25,7 +24,7 @@ const SakuraApp: React.FC = () => {
     loading: true,
     loadingMessage: 'Initializing system...',
     isDbReady: false,
-    theme: 'sakura-night'
+    theme: 'zen-dark'
   });
 
   // Extra state for features
@@ -75,7 +74,7 @@ const SakuraApp: React.FC = () => {
         
         await refreshPlaylists();
         
-        const initialTheme = savedTheme?.value || 'sakura-night';
+        const initialTheme = savedTheme?.value || 'zen-dark';
         document.documentElement.setAttribute('data-theme', initialTheme);
         document.body.setAttribute('data-texture', savedSettings.textureMode);
         document.body.setAttribute('data-lighting', savedSettings.lightingMode);
@@ -122,7 +121,7 @@ const SakuraApp: React.FC = () => {
   };
   
   const handleCycleTheme = () => {
-       const themes: Theme[] = ['sakura-night', 'ivory-paper', 'ink-blossom', 'cyber-grid', 'autumn-scroll', 'nordic-frost'];
+       const themes: Theme[] = ['zen-dark', 'zen-light'];
        const next = themes[(themes.indexOf(state.theme) + 1) % themes.length];
        handleToggleTheme(next);
   };
@@ -405,7 +404,6 @@ const SakuraApp: React.FC = () => {
                 setBookToCurate(id);
                 setCurationModalOpen(true);
             }}
-            onEditBook={() => {}}
             onTogglePageBookmark={() => readerRef.current?.toggleBookmark()}
             isPageBookmarked={isPageBookmarked}
         />
@@ -475,17 +473,14 @@ const SakuraApp: React.FC = () => {
             onAddToCuration={handleAddToCuration}
         />
 
-        {/* Fullscreen Blurry Loader */}
+        {/* Fullscreen Zen Loader */}
         {state.loading && state.view !== 'WELCOME' && (
-            <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-xl flex items-center justify-center animate-in fade-in duration-500">
-                <div className="flex flex-col items-center gap-6">
-                    <div className="relative">
-                        <div className="w-16 h-16 border border-white/20 rounded-full loader-ring"></div>
-                        <div className="absolute inset-0 flex items-center justify-center">
-                            <div className="w-2 h-2 bg-[var(--accent)] rounded-full animate-pulse"></div>
-                        </div>
+            <div className="fixed inset-0 z-[100] bg-[var(--bg-main)]/80 backdrop-blur-3xl flex items-center justify-center animate-in fade-in duration-500">
+                <div className="flex flex-col items-center gap-8">
+                    <div className="w-20 h-[1px] bg-[var(--border-glass)] overflow-hidden">
+                         <div className="w-full h-full bg-[var(--text-main)] animate-[progress_1.5s_ease-in-out_infinite]" />
                     </div>
-                    <p className="text-white font-serif tracking-widest text-lg animate-pulse min-h-[1.5rem]">{state.loadingMessage || 'Loading...'}</p>
+                    <p className="text-[10px] text-[var(--text-main)] uppercase tracking-[0.3em] animate-pulse">{state.loadingMessage || 'Thinking...'}</p>
                 </div>
             </div>
         )}
@@ -494,4 +489,3 @@ const SakuraApp: React.FC = () => {
 };
 
 export default SakuraApp;
-    

@@ -27,30 +27,30 @@ export const CurationModal: React.FC<CurationModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
-      <div className="bg-[var(--bg-card)]/90 border border-[var(--border-color)] w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh] ring-1 ring-white/10">
+      <div className="glass-panel w-full max-w-md rounded-2xl shadow-[var(--shadow-zen)] overflow-hidden flex flex-col max-h-[80vh] border-0">
         
         {/* Header */}
-        <div className="p-5 border-b border-[var(--border-color)] flex items-center justify-between bg-[var(--bg-main)]/50 backdrop-blur-xl">
-            <h3 className="font-serif text-xl text-[var(--text-main)] flex items-center gap-2">
-                <FolderHeart className="w-5 h-5 text-[var(--accent)]" />
+        <div className="p-5 border-b border-[var(--border-glass)] flex items-center justify-between">
+            <h3 className="text-xl text-[var(--text-main)] font-semibold flex items-center gap-2">
+                <FolderHeart className="w-5 h-5 text-[var(--accent)]" strokeWidth={1} />
                 Add to Curation
             </h3>
             <button onClick={onClose} className="p-1 hover:bg-[var(--bg-overlay)] rounded-full text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors">
-                <X className="w-5 h-5" />
+                <X className="w-5 h-5" strokeWidth={1} />
             </button>
         </div>
 
         {/* Content */}
-        <div className="p-4 overflow-y-auto flex-1 bg-[var(--bg-card)]">
+        <div className="p-4 overflow-y-auto flex-1 bg-transparent">
             {view === 'list' ? (
                 <div className="space-y-2">
                     {playlists.map(pl => (
                         <button
                             key={pl.id}
                             onClick={() => onAddToCuration(pl.id)}
-                            className="w-full flex items-center justify-between p-4 rounded-xl border border-[var(--border-color)] hover:border-[var(--accent)] hover:bg-[var(--bg-overlay)] transition-all group text-left"
+                            className="w-full flex items-center justify-between p-4 rounded-xl border border-[var(--border-glass)] hover:border-[var(--accent)] hover:bg-[var(--bg-card)] transition-all group text-left"
                         >
-                            <span className="font-serif text-[var(--text-main)] text-lg">{pl.name}</span>
+                            <span className="text-[var(--text-main)] text-lg font-medium">{pl.name}</span>
                             <span className="mono text-xs text-[var(--text-muted)] group-hover:text-[var(--text-main)]">
                                 {pl.bookIds.length} items
                             </span>
@@ -59,9 +59,9 @@ export const CurationModal: React.FC<CurationModalProps> = ({
                     
                     <button
                         onClick={() => setView('new')}
-                        className="w-full flex items-center justify-center gap-2 p-4 rounded-xl border border-dashed border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-[var(--text-main)] transition-all mt-4 group"
+                        className="w-full flex items-center justify-center gap-2 p-4 rounded-xl border border-dashed border-[var(--border-glass)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-[var(--text-main)] transition-all mt-4 group"
                     >
-                        <Plus className="w-4 h-4 group-hover:scale-110 transition-transform" />
+                        <Plus className="w-4 h-4 group-hover:scale-110 transition-transform" strokeWidth={1} />
                         <span className="mono text-xs uppercase tracking-widest">Create New Curation</span>
                     </button>
                 </div>
@@ -75,7 +75,7 @@ export const CurationModal: React.FC<CurationModalProps> = ({
                             placeholder="e.g. Weekend Reads, Best Art..."
                             value={newCurationName}
                             onChange={(e) => setNewCurationName(e.target.value)}
-                            className="w-full bg-[var(--bg-main)] border border-[var(--border-color)] p-4 rounded-xl text-[var(--text-main)] focus:outline-none focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)] transition-all placeholder:text-[var(--text-muted)]/50"
+                            className="w-full bg-[var(--bg-card)] border border-[var(--border-glass)] p-4 rounded-xl text-[var(--text-main)] focus:outline-none focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)] transition-all placeholder:text-[var(--text-muted)]/50"
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter' && newCurationName.trim()) {
                                     onAddToCuration(null, newCurationName);
@@ -87,7 +87,7 @@ export const CurationModal: React.FC<CurationModalProps> = ({
                         {playlists.length > 0 && (
                             <button 
                                 onClick={() => setView('list')}
-                                className="flex-1 py-3 rounded-xl border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-overlay)] transition-all"
+                                className="flex-1 py-3 rounded-xl border border-[var(--border-glass)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-card)] transition-all"
                             >
                                 Cancel
                             </button>

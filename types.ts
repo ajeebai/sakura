@@ -93,7 +93,7 @@ export interface Book extends BookMetadata {
 
 export type ViewState = 'WELCOME' | 'LIBRARY_LIST' | 'LIBRARY' | 'READER';
 
-export type Theme = 'sakura-night' | 'ivory-paper' | 'ink-blossom' | 'cyber-grid' | 'autumn-scroll' | 'nordic-frost';
+export type Theme = 'zen-dark' | 'zen-light' | 'sakura-night' | 'ivory-paper';
 
 // Added 'infinity' mode
 export type LibraryViewMode = 'category' | 'grid' | 'infinity';
@@ -114,6 +114,8 @@ export interface AppState {
 export type ReadingDirection = 'LTR' | 'RTL';
 export type ImageFitMode = 'contain' | 'width' | 'height' | 'original';
 
+export type LightingMode = 'ambient' | 'spotlight' | 'immersive' | 'dim' | 'midnight' | 'cinema' | 'paper';
+
 export interface ReaderSettings {
     direction: ReadingDirection;
     fitMode: ImageFitMode;
@@ -124,9 +126,9 @@ export interface ReaderSettings {
     // Visual/Audio Settings
     enableSfx: boolean;
     atmosphere: 'none' | 'rain' | 'vinyl';
-    lightingMode: 'ambient' | 'spotlight';
+    lightingMode: LightingMode;
     
     // UPDATED TEXTURES & TRANSITIONS
-    textureMode: 'none' | 'paper';
+    textureMode: 'none' | 'paper' | 'washi' | 'halftone' | 'canvas' | 'stipple' | 'linen';
     transitionMode: 'none' | 'snap' | 'smooth' | 'fade';
 }

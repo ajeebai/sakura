@@ -1,15 +1,12 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-    Palette, Layers, Grid, List, CloudRain, Sun, Zap, ArrowLeft, Search, 
-    BookOpen, LayoutTemplate, Sparkles, X, Heart, FolderHeart, Edit, 
-    Book, Scroll, Bookmark
+    Palette, Layers, Grid, List, Sun, Zap, ArrowLeft, Search, 
+    BookOpen, Sparkles, Heart, FolderHeart, 
+    Book, Scroll, Bookmark, Moon, Eye, Lightbulb, Monitor
 } from 'lucide-react';
-import { Theme, ReaderSettings, LibraryViewMode, Playlist, Book as BookType, ViewState } from '../types';
+import { Theme, ReaderSettings, LibraryViewMode, ViewState, LightingMode } from '../types';
 import { playClickSfx, playHoverSfx } from '../services/audio';
-
-// Context Definitions
-type MenuContextType = 'GLOBAL' | 'BOOK' | 'READER';
 
 interface RadialMenuProps {
   currentView: ViewState;
@@ -30,7 +27,6 @@ interface RadialMenuProps {
   activeBookId?: string | null;
   onToggleFavorite?: (bookId: string) => void;
   onAddToCuration?: (bookId: string) => void;
-  onEditBook?: (bookId: string) => void;
   
   // Reader specific
   onTogglePageBookmark?: () => void;
@@ -51,7 +47,7 @@ export const RadialMenu: React.FC<RadialMenuProps> = ({
     settings, onSettingChange,
     viewMode, onViewModeChange,
     onSearch, onBack,
-    activeBookId, onToggleFavorite, onAddToCuration, onEditBook,
+    activeBookId, onToggleFavorite, onAddToCuration,
     onTogglePageBookmark, isPageBookmarked
 }) => {
     const [position, setPosition] = useState<{x: number, y: number} | null>(null);
@@ -105,25 +101,42 @@ export const RadialMenu: React.FC<RadialMenuProps> = ({
         if (menuStack.length > 0) return menuStack[menuStack.length - 1];
 
         // Root Level Generation
-        const themes: Theme[] = ['sakura-night', 'ivory-paper', 'ink-blossom', 'cyber-grid', 'autumn-scroll', 'nordic-frost'];
-        const transitions = ['none', 'snap', 'smooth', 'fade'];
+        const themes: Theme[] = ['zen-dark', 'zen-light'];
+        const textures = ['none', 'paper', 'washi', 'halftone', 'canvas', 'stipple', 'linen'];
+
+        const lightingMenu: MenuItem = {
+            id: 'lighting',
+            icon: settings.lightingMode === 'spotlight' ? <Zap className="w-5 h-5" strokeWidth={1} /> : <Sun className="w-5 h-5" strokeWidth={1} />,
+            label: `Light: ${settings.lightingMode}`,
+            action: () => {}, // Submenu trigger
+            submenu: [
+                { id: 'l-ambient', icon: <Sun className="w-5 h-5" strokeWidth={1}/>, label: 'Ambient', action: () => onSettingChange('lightingMode', 'ambient') },
+                { id: 'l-spotlight', icon: <Zap className="w-5 h-5" strokeWidth={1}/>, label: 'Spotlight', action: () => onSettingChange('lightingMode', 'spotlight') },
+                { id: 'l-immersive', icon: <Eye className="w-5 h-5" strokeWidth={1}/>, label: 'Immersive', action: () => onSettingChange('lightingMode', 'immersive') },
+                { id: 'l-dim', icon: <Moon className="w-5 h-5" strokeWidth={1}/>, label: 'Dim', action: () => onSettingChange('lightingMode', 'dim') },
+                { id: 'l-midnight', icon: <Moon className="w-5 h-5 fill-current" strokeWidth={1}/>, label: 'Midnight', action: () => onSettingChange('lightingMode', 'midnight') },
+                { id: 'l-cinema', icon: <Monitor className="w-5 h-5" strokeWidth={1}/>, label: 'Cinema', action: () => onSettingChange('lightingMode', 'cinema') },
+                { id: 'l-paper', icon: <Book className="w-5 h-5" strokeWidth={1}/>, label: 'Paper', action: () => onSettingChange('lightingMode', 'paper') },
+            ]
+        };
 
         const commonItems: MenuItem[] = [
              {
                 id: 'theme',
-                icon: <Palette className="w-5 h-5" />,
-                label: 'Theme',
+                icon: <Palette className="w-5 h-5" strokeWidth={1} />,
+                label: `Theme: ${currentTheme}`,
                 action: () => onThemeChange(themes[(themes.indexOf(currentTheme) + 1) % themes.length])
             },
             {
                 id: 'texture',
-                icon: <Layers className="w-5 h-5" />,
-                label: 'Texture',
+                icon: <Layers className="w-5 h-5" strokeWidth={1} />,
+                label: `Texture: ${settings.textureMode}`,
                 action: () => {
-                    const modes = ['none', 'paper'];
-                    onSettingChange('textureMode', modes[(modes.indexOf(settings.textureMode) + 1) % modes.length]);
+                    const next = textures[(textures.indexOf(settings.textureMode) + 1) % textures.length];
+                    onSettingChange('textureMode', next);
                 }
-            }
+            },
+            lightingMenu
         ];
 
         // 1. Book Context (Right clicked on a book in library)
@@ -131,21 +144,15 @@ export const RadialMenu: React.FC<RadialMenuProps> = ({
             return [
                 {
                     id: 'favorite',
-                    icon: <Heart className="w-5 h-5" />,
+                    icon: <Heart className="w-5 h-5" strokeWidth={1} />,
                     label: 'Favorite',
                     action: () => onToggleFavorite && onToggleFavorite(contextData.bookId)
                 },
                 {
                     id: 'curate',
-                    icon: <FolderHeart className="w-5 h-5" />,
+                    icon: <FolderHeart className="w-5 h-5" strokeWidth={1} />,
                     label: 'Add to Curation',
                     action: () => onAddToCuration && onAddToCuration(contextData.bookId)
-                },
-                {
-                    id: 'edit',
-                    icon: <Edit className="w-5 h-5" />,
-                    label: 'Edit Info',
-                    action: () => onEditBook && onEditBook(contextData.bookId)
                 },
                 ...commonItems
             ];
@@ -156,44 +163,39 @@ export const RadialMenu: React.FC<RadialMenuProps> = ({
              const items: MenuItem[] = [
                  {
                      id: 'back',
-                     icon: <ArrowLeft className="w-5 h-5" />,
-                     label: 'Back to Library',
+                     icon: <ArrowLeft className="w-5 h-5" strokeWidth={1} />,
+                     label: 'Library',
                      action: onBack
                  },
                  {
                      id: 'bookmark',
-                     icon: <Bookmark className={`w-5 h-5 ${isPageBookmarked ? 'fill-current text-red-500' : ''}`} />,
-                     label: isPageBookmarked ? 'Remove Bookmark' : 'Bookmark Page',
+                     icon: <Bookmark className={`w-5 h-5 ${isPageBookmarked ? 'fill-current text-white' : ''}`} strokeWidth={1} />,
+                     label: isPageBookmarked ? 'Unmark' : 'Bookmark',
                      action: () => onTogglePageBookmark && onTogglePageBookmark()
                  },
                  {
                     id: 'reader-mode',
-                    icon: settings.viewMode === 'vertical' ? <Scroll className="w-5 h-5"/> : <BookOpen className="w-5 h-5"/>,
+                    icon: settings.viewMode === 'vertical' ? <Scroll className="w-5 h-5" strokeWidth={1}/> : <BookOpen className="w-5 h-5" strokeWidth={1}/>,
                     label: `View: ${settings.viewMode}`,
                     action: () => {}, // Submenu trigger
                     submenu: [
-                        { id: 'm-single', icon: <Book className="w-5 h-5"/>, label: 'Single Page', action: () => onSettingChange('viewMode', 'single') },
-                        { id: 'm-spread', icon: <BookOpen className="w-5 h-5"/>, label: 'Spread View', action: () => onSettingChange('viewMode', 'spread') },
-                        { id: 'm-vert', icon: <Scroll className="w-5 h-5"/>, label: 'Vertical Scroll', action: () => onSettingChange('viewMode', 'vertical') },
-                        { id: 'm-grid', icon: <Grid className="w-5 h-5"/>, label: 'Grid View', action: () => onSettingChange('viewMode', 'grid') },
+                        { id: 'm-single', icon: <Book className="w-5 h-5" strokeWidth={1}/>, label: 'Single', action: () => onSettingChange('viewMode', 'single') },
+                        { id: 'm-spread', icon: <BookOpen className="w-5 h-5" strokeWidth={1}/>, label: 'Spread', action: () => onSettingChange('viewMode', 'spread') },
+                        { id: 'm-vert', icon: <Scroll className="w-5 h-5" strokeWidth={1}/>, label: 'Vertical', action: () => onSettingChange('viewMode', 'vertical') },
+                        { id: 'm-grid', icon: <Grid className="w-5 h-5" strokeWidth={1}/>, label: 'Grid', action: () => onSettingChange('viewMode', 'grid') },
                     ]
                  },
-                 {
-                     id: 'lighting',
-                     icon: settings.lightingMode === 'spotlight' ? <Zap className="w-5 h-5" /> : <Sun className="w-5 h-5" />,
-                     label: settings.lightingMode,
-                     action: () => onSettingChange('lightingMode', settings.lightingMode === 'ambient' ? 'spotlight' : 'ambient')
-                 },
-                 ...commonItems
+                 lightingMenu,
+                 ...commonItems.filter(i => i.id !== 'lighting') // Avoid duplicate lighting
              ];
 
              // Only show transitions if NOT vertical/grid
              if (settings.viewMode !== 'vertical' && settings.viewMode !== 'grid') {
-                 items.splice(2, 0, {
+                 items.splice(3, 0, {
                      id: 'transition',
-                     icon: <Sparkles className="w-5 h-5" />,
+                     icon: <Sparkles className="w-5 h-5" strokeWidth={1} />,
                      label: `FX: ${settings.transitionMode}`,
-                     action: () => onSettingChange('transitionMode', transitions[(transitions.indexOf(settings.transitionMode) + 1) % transitions.length])
+                     action: () => onSettingChange('transitionMode', ['none', 'snap', 'smooth', 'fade'][(['none', 'snap', 'smooth', 'fade'].indexOf(settings.transitionMode) + 1) % 4])
                  });
              }
              return items;
@@ -203,13 +205,13 @@ export const RadialMenu: React.FC<RadialMenuProps> = ({
         return [
             {
                 id: 'search',
-                icon: <Search className="w-5 h-5" />,
+                icon: <Search className="w-5 h-5" strokeWidth={1} />,
                 label: 'Search',
                 action: onSearch
             },
             {
                 id: 'view',
-                icon: viewMode === 'grid' ? <Grid className="w-5 h-5" /> : <List className="w-5 h-5" />,
+                icon: viewMode === 'grid' ? <Grid className="w-5 h-5" strokeWidth={1} /> : <List className="w-5 h-5" strokeWidth={1} />,
                 label: viewMode,
                 action: () => onViewModeChange(viewMode === 'grid' ? 'category' : 'grid')
             },
@@ -249,15 +251,15 @@ export const RadialMenu: React.FC<RadialMenuProps> = ({
             className="fixed z-[9999]" 
             style={{ left: position.x, top: position.y }}
         >
-            {/* Center Hub */}
+            {/* Center Hub - Glass Pill */}
             <button
                 onClick={handleCenterClick}
-                className="absolute -translate-x-1/2 -translate-y-1/2 w-14 h-14 bg-[var(--bg-main)] rounded-full border border-[var(--border-color)] shadow-2xl flex items-center justify-center z-20 hover:scale-110 transition-transform group ring-1 ring-white/10"
+                className="absolute -translate-x-1/2 -translate-y-1/2 w-16 h-16 glass-panel rounded-full flex items-center justify-center z-20 hover:scale-105 transition-transform group"
             >
                 {menuStack.length > 0 ? (
-                    <ArrowLeft className="w-6 h-6 text-[var(--text-main)]" />
+                    <ArrowLeft className="w-6 h-6 text-[var(--text-main)]" strokeWidth={1} />
                 ) : (
-                    <div className="w-3 h-3 bg-[var(--accent)] rounded-full animate-pulse group-hover:bg-[var(--text-main)]" />
+                    <div className="w-2 h-2 bg-[var(--text-main)] rounded-full animate-pulse" />
                 )}
             </button>
 
@@ -275,15 +277,15 @@ export const RadialMenu: React.FC<RadialMenuProps> = ({
                             handleAction(item);
                         }}
                         onMouseEnter={() => settings.enableSfx && playHoverSfx()}
-                        className="absolute w-12 h-12 bg-[var(--bg-card)] border border-[var(--border-color)] rounded-full shadow-lg flex items-center justify-center hover:bg-[var(--text-main)] hover:text-[var(--bg-main)] hover:scale-110 transition-all duration-300 group z-10 ring-1 ring-white/5"
+                        className="absolute w-12 h-12 glass-card rounded-full flex items-center justify-center hover:bg-[var(--text-main)] hover:text-[var(--bg-main)] hover:scale-110 transition-all duration-300 group z-10"
                         style={{
                             transform: `translate(${x}px, ${y}px) translate(-50%, -50%)`,
                         }}
                     >
                         {item.icon}
                         
-                        {/* Glassmorphic Tooltip */}
-                        <span className="absolute top-full mt-3 text-[10px] font-mono uppercase bg-[var(--bg-overlay)] backdrop-blur-md text-[var(--text-main)] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none border border-[var(--border-color)] z-30 shadow-xl">
+                        {/* Floating Tooltip */}
+                        <span className="absolute top-full mt-4 text-[10px] font-medium tracking-widest uppercase glass-panel text-[var(--text-main)] px-3 py-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-30">
                             {item.label}
                         </span>
                     </button>

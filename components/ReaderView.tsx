@@ -78,7 +78,7 @@ const PdfPage: React.FC<{ pdfDoc: any; pageIndex: number; isActive: boolean; cla
     return <canvas ref={canvasRef} className={`bg-white shadow-sm pointer-events-none ${className}`} style={{ width: '100%', height: 'auto' }} />;
 });
 
-const LazyImagePage: React.FC<{ handle: FileHandle; isActive: boolean; alt: string; className?: string; style?: React.CSSProperties }> = React.memo(({ handle, isActive, alt, className, style }) => {
+const LazyImagePage: React.FC<{ handle: FileHandle; isActive: boolean; alt: string; className?: string; style?: React.CSSProperties; onLoad?: (url: string) => void }> = React.memo(({ handle, isActive, alt, className, style, onLoad }) => {
     const [src, setSrc] = useState<string | null>(null);
 
     useEffect(() => {
@@ -94,6 +94,7 @@ const LazyImagePage: React.FC<{ handle: FileHandle; isActive: boolean; alt: stri
         getFileUrl(handle).then(url => { 
             if(active) {
                 setSrc(url);
+                if(onLoad) onLoad(url);
             } else {
                 URL.revokeObjectURL(url);
             }
@@ -101,8 +102,6 @@ const LazyImagePage: React.FC<{ handle: FileHandle; isActive: boolean; alt: stri
 
         return () => { 
             active = false; 
-            // We rely on the next effect cycle or parent unmount to cleanup, 
-            // but explicitly cleaning up here is safer for memory.
         };
     }, [handle, isActive]);
 
@@ -134,10 +133,10 @@ const ThumbnailScrubber: React.FC<{
             onMouseLeave={() => setIsHovered(false)}
         >
             {/* Trigger Zone */}
-            <div className="w-6 h-full bg-transparent group-hover:bg-[var(--bg-main)]/10 transition-colors duration-300"></div>
+            <div className="w-8 h-full bg-transparent group-hover:bg-[var(--bg-main)]/5 transition-colors duration-300"></div>
             
             {/* Drawer */}
-            <div className={`w-24 bg-[var(--bg-main)]/95 backdrop-blur-md border-r border-[var(--border-color)] transition-all duration-300 ease-[var(--ease-out-expo)] overflow-y-auto overflow-x-hidden scrollbar-hide flex flex-col items-center py-4 gap-2 absolute left-0 top-0 bottom-0 ${isHovered ? 'translate-x-0 opacity-100 shadow-2xl' : '-translate-x-full opacity-0'}`}>
+            <div className={`w-28 glass-panel border-r-0 rounded-r-2xl my-4 ml-0 transition-all duration-300 ease-[var(--ease-out-expo)] overflow-y-auto overflow-x-hidden scrollbar-hide flex flex-col items-center py-6 gap-4 absolute left-0 top-0 bottom-0 ${isHovered ? 'translate-x-0 opacity-100 shadow-[var(--shadow-zen)]' : '-translate-x-full opacity-0'}`}>
                 {pages.map((p, idx) => {
                     // Only render thumbnails close to current page OR if the drawer is hovered
                     // This saves massive memory
@@ -147,7 +146,7 @@ const ThumbnailScrubber: React.FC<{
                         <div 
                             key={idx} 
                             onClick={() => onJump(idx)}
-                            className={`relative w-16 h-24 flex-shrink-0 cursor-pointer rounded overflow-hidden border transition-all duration-300 ${idx === currentPage ? 'border-[var(--accent)] ring-2 ring-[var(--accent)]/20' : 'border-transparent hover:border-[var(--text-muted)]'}`}
+                            className={`relative w-16 h-24 flex-shrink-0 cursor-pointer rounded-sm overflow-hidden border transition-all duration-300 ${idx === currentPage ? 'border-[var(--accent)] ring-1 ring-[var(--accent)] scale-105' : 'border-transparent opacity-60 hover:opacity-100'}`}
                         >
                             {shouldRender && (
                                 isPdf ? (
@@ -156,7 +155,7 @@ const ThumbnailScrubber: React.FC<{
                                     <LazyImagePage handle={p.handle} isActive={true} alt={`Pg ${idx}`} className="w-full h-full object-cover" />
                                 )
                             )}
-                            <div className="absolute inset-0 flex items-center justify-center bg-black/40 text-[10px] text-white font-mono font-bold">
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/40 text-[10px] text-white font-mono font-bold opacity-0 hover:opacity-100 transition-opacity">
                                 {idx + 1}
                             </div>
                         </div>
@@ -184,6 +183,9 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(({
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [transitionPhase, setTransitionPhase] = useState<'enter' | 'exit' | 'idle'>('idle');
   const [showStamp, setShowStamp] = useState(false);
+
+  // Immersive Background URL
+  const [immersiveUrl, setImmersiveUrl] = useState<string | null>(null);
 
   // --- ZOOM ENGINE STATE ---
   const contentRef = useRef<HTMLDivElement>(null);
@@ -393,12 +395,19 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(({
   const renderContent = (idx: number, active: boolean) => {
       if (idx >= totalPages) return <div className="w-full h-full bg-transparent" />;
       const isMarked = bookmarks.has(idx);
+      
+      const handleImageLoad = (url: string) => {
+          if (active && settings.lightingMode === 'immersive') {
+              setImmersiveUrl(url);
+          }
+      };
+
       return (
           <div className="relative w-full h-full flex items-center justify-center backface-hidden">
               {isPdf ? (
                   <PdfPage pdfDoc={pdfDoc} pageIndex={idx + 1} isActive={active} className="shadow-2xl max-h-screen max-w-full object-contain" />
               ) : (
-                  <LazyImagePage handle={book.pages[idx].handle} isActive={active} alt={`Page ${idx}`} style={getImageStyle()} />
+                  <LazyImagePage handle={book.pages[idx].handle} isActive={active} alt={`Page ${idx}`} style={getImageStyle()} onLoad={handleImageLoad} />
               )}
               {isMarked && (
                   <div className="absolute top-0 right-8 w-8 h-12 bg-red-600 shadow-lg z-20 flex items-end justify-center pb-2 animate-in fade-in slide-in-from-top-4 duration-300">
@@ -428,6 +437,18 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(({
       onMouseUp={() => isDragging.current=false}
     >
       
+      {/* Immersive Background Layer */}
+      {settings.lightingMode === 'immersive' && immersiveUrl && (
+          <div 
+            className="fixed inset-0 z-[-1] transition-all duration-1000 ease-in-out bg-cover bg-center"
+            style={{ 
+                backgroundImage: `url(${immersiveUrl})`,
+                filter: 'blur(80px) saturate(1.5) brightness(0.6)',
+                transform: 'scale(1.2)' 
+            }}
+          />
+      )}
+
       {/* Thumbnail Scrubber (Left) */}
       <ThumbnailScrubber 
         pages={isPdf ? Array.from({length: totalPages}) : book.pages}

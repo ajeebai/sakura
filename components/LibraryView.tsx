@@ -1,10 +1,9 @@
 
 import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
-import { Book, LibraryViewMode, Playlist, BookMetadata, FileHandle, Page } from '../types';
-import { generateThumbnail, generatePdfThumbnail, generateArchiveThumbnail } from '../utils/imageUtils';
+import { Book, LibraryViewMode, Playlist, BookMetadata, FileHandle, Page, Bookmark } from '../types';
+import { generateThumbnail } from '../utils/imageUtils';
 import { dbUpdateBook, dbGetFavoriteFolders, dbGetPlaylists, dbCreatePlaylist, dbAddBookToPlaylist, dbDeletePlaylist, dbGetAllBookmarks, dbGetBooksForLibrary, dbGetAllProgress } from '../services/db';
-import { Search, Heart, ChevronLeft, Folder, X, Plus, MoreVertical, Trash2, FolderHeart, Sparkles, Bookmark } from 'lucide-react';
-import { EditBookModal } from './EditBookModal';
+import { Search, Heart, ChevronLeft, Folder, X, Plus, MoreVertical, Trash2, FolderHeart, Sparkles, Bookmark as BookmarkIcon, Home } from 'lucide-react';
 import { CurationModal } from './CurationModal';
 import { naturalSort } from '../utils/fileUtils';
 import { playClickSfx, playHoverSfx } from '../services/audio';
@@ -29,16 +28,14 @@ const PatinaOverlay: React.FC<{ readCount: number }> = ({ readCount }) => {
     if (readCount < 2) return null;
     const intensity = Math.min(1, Math.max(0, (readCount - 2) / 30)); 
     return (
-        <div className="absolute inset-0 pointer-events-none z-20">
-            {readCount > 5 && (
-                <div className="absolute top-0 right-0 w-16 h-16 patina-crease" style={{ opacity: intensity * 0.5 }} />
-            )}
-            <div className="absolute inset-0 bg-yellow-100/10 mix-blend-multiply" style={{ opacity: intensity * 0.3 }} />
+        <div className="absolute inset-0 pointer-events-none z-20 opacity-30">
+             {/* Zen Patina is very subtle noise */}
+             <div className="absolute inset-0 bg-black/5 mix-blend-overlay" style={{ opacity: intensity }} />
         </div>
     );
 };
 
-// Enhanced BookCard with Preview Glimpses
+// Floating Zen Book Card
 const BookCard: React.FC<{ 
     book: Book; 
     onClick: () => void;
@@ -84,14 +81,13 @@ const BookCard: React.FC<{
       let activeUrl: string | null = null;
 
       if (isHovered && book.pages && book.pages.length > 1) {
-          let idx = 1; // Start from page 1, 0 is cover usually
+          let idx = 1;
           interval = setInterval(async () => {
               if (idx >= Math.min(6, book.pages.length)) idx = 1;
               const page = book.pages[idx];
               if (page && page.handle) {
                    try {
                        const url = await getFileUrl(page.handle);
-                       // Revoke previous preview
                        if(activeUrl) URL.revokeObjectURL(activeUrl);
                        activeUrl = url;
                        setPreviewUrl(url);
@@ -126,35 +122,34 @@ const BookCard: React.FC<{
       style={{ width, height, ...style }}
       data-book-id={book.id}
     >
-      <div className={`relative w-full h-full bg-[var(--bg-card)] overflow-hidden transition-all duration-300 ease-[var(--ease-out-expo)] aspect-[2/3] border border-[var(--border-color)] shadow-md group-hover:scale-110 group-hover:shadow-2xl group-hover:border-[var(--text-main)] group-hover:z-50 rounded-sm origin-bottom`}>
+      {/* Floating Card Design */}
+      <div className={`relative w-full h-full bg-[var(--bg-card)] overflow-hidden transition-all duration-500 ease-[var(--ease-out-expo)] aspect-[2/3] border border-[var(--border-glass)] shadow-sm group-hover:scale-105 group-hover:shadow-[var(--shadow-zen)] rounded-lg`}>
         <PatinaOverlay readCount={book.readCount || 0} />
         
         {displayUrl ? (
           <img 
             src={displayUrl} 
             alt={book.title} 
-            className={`w-full h-full object-cover transition-all duration-500 ${isHovered ? 'grayscale-0' : 'grayscale-[0.2] contrast-[1.1]'}`} 
+            className={`w-full h-full object-cover transition-all duration-700 ${isHovered ? 'opacity-100' : 'opacity-90 grayscale-[0.1]'}`} 
             loading={priority ? "eager" : "lazy"} 
           />
         ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center bg-[var(--bg-card)] p-4 border border-dashed border-[var(--border-color)]">
-            <span className="mono text-[10px] uppercase text-[var(--text-muted)] tracking-widest break-all text-center">{book.title.slice(0, 4)}</span>
+          <div className="w-full h-full flex flex-col items-center justify-center bg-[var(--bg-card)] p-4">
+            <span className="mono text-[10px] uppercase text-[var(--text-muted)] tracking-widest break-all text-center opacity-50">{book.title.slice(0, 4)}</span>
           </div>
         )}
 
-        <div className={`absolute inset-0 bg-gradient-to-t from-[var(--bg-overlay)] via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 flex flex-col justify-end p-4 z-30`}>
-             <h3 className="text-[var(--text-main)] font-medium text-sm leading-tight line-clamp-2 font-serif drop-shadow-md">{book.title}</h3>
-             {isHovered && previewUrl && (
-                 <span className="mono text-[8px] text-[var(--accent)] mt-1 animate-pulse">Previewing Page {previewIndex + 1}</span>
-             )}
+        {/* Minimal Info Overlay */}
+        <div className={`absolute inset-0 bg-gradient-to-t from-[var(--bg-overlay)] via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 flex flex-col justify-end p-6 z-30`}>
+             <h3 className="text-[var(--text-main)] font-semibold text-sm leading-tight line-clamp-2 tracking-tight drop-shadow-sm">{book.title}</h3>
         </div>
         
         {book.isFavorite && (
-            <div className="absolute top-2 right-2 text-[var(--accent)] drop-shadow-md z-30"><Heart className="w-3 h-3 fill-current" /></div>
+            <div className="absolute top-3 right-3 text-[var(--accent)] z-30"><Heart className="w-3 h-3 fill-current" strokeWidth={1} /></div>
         )}
         
         {showProgress && percentage > 0 && percentage < 100 && (
-            <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-black/20 z-30">
+            <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-black/10 z-30">
                 <div className="h-full bg-[var(--accent)]" style={{ width: `${percentage}%` }} />
             </div>
         )}
@@ -165,6 +160,41 @@ const BookCard: React.FC<{
 
 type Tab = 'collections' | 'curations' | 'bookmarks';
 
+// Component to render a single bookmarked page thumbnail
+const BookmarkThumbnail: React.FC<{ book: Book; pageIndex: number; onClick: () => void }> = React.memo(({ book, pageIndex, onClick }) => {
+    const [url, setUrl] = useState<string | null>(null);
+
+    useEffect(() => {
+        let active = true;
+        if (book.pages && book.pages[pageIndex]) {
+            getFileUrl(book.pages[pageIndex].handle).then(u => {
+                if (active) setUrl(u);
+            });
+        }
+        return () => { active = false; if(url) URL.revokeObjectURL(url); };
+    }, [book, pageIndex]);
+
+    return (
+        <div onClick={onClick} className="flex flex-col gap-4 group cursor-pointer">
+            <div className="relative w-full aspect-[2/3] bg-[var(--bg-card)] rounded-lg overflow-hidden border border-[var(--border-glass)] group-hover:shadow-[var(--shadow-zen)] group-hover:scale-105 transition-all duration-500">
+                {url ? (
+                    <img src={url} alt="Bookmark" className="w-full h-full object-cover" loading="lazy" />
+                ) : (
+                    <div className="w-full h-full flex items-center justify-center"><div className="w-6 h-6 rounded-full border border-t-[var(--accent)] animate-spin"/></div>
+                )}
+                <div className="absolute top-2 right-2 text-red-500 z-10 drop-shadow-md">
+                     <BookmarkIcon className="w-5 h-5 fill-current" strokeWidth={1} />
+                </div>
+            </div>
+             <div className="flex flex-col">
+                <p className="font-medium text-sm text-[var(--text-main)] leading-tight truncate">{book.title}</p>
+                <p className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest mt-1">Page {pageIndex + 1}</p>
+            </div>
+        </div>
+    );
+});
+
+
 export const LibraryView: React.FC<LibraryViewProps> = ({ 
     books, onSelectBook, onUpdateBook, onGoHome, viewMode, enableSfx,
     isSearchOpen, onToggleSearch, onOpenVirtualBook,
@@ -174,8 +204,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   const [search, setSearch] = useState('');
   const [currentPath, setCurrentPath] = useState<string>(''); 
   const [favoriteFolders, setFavoriteFolders] = useState<Set<string>>(new Set());
-  const [editingBookId, setEditingBookId] = useState<string | null>(null);
-  const [bookmarkCount, setBookmarkCount] = useState(0);
+  const [rawBookmarks, setRawBookmarks] = useState<Bookmark[]>([]);
   
   // Curation Modal State
   const [isCurationModalOpen, setIsCurationModalOpen] = useState(false);
@@ -185,10 +214,9 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       dbGetFavoriteFolders().then(folders => setFavoriteFolders(new Set(folders))); 
   }, []);
   
-  // Refresh bookmark count when entering bookmark tab
   useEffect(() => {
       if (activeTab === 'bookmarks') {
-          dbGetAllBookmarks().then(res => setBookmarkCount(res.length));
+          dbGetAllBookmarks().then(res => setRawBookmarks(res));
       }
   }, [activeTab]);
 
@@ -241,7 +269,6 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       if (targetId && bookToCurate) {
           await dbAddBookToPlaylist(targetId, bookToCurate);
       }
-      // If bookToCurate is null, we just created a playlist which is valid behavior
       
       onRefreshPlaylists();
       setIsCurationModalOpen(false);
@@ -255,78 +282,69 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       }
   };
 
-  const handleOpenCollectedMoments = async () => {
-      const allBookmarks = await dbGetAllBookmarks();
-      if (allBookmarks.length === 0) {
-          alert("No bookmarks found yet.");
-          return;
-      }
-      const pages: Page[] = [];
-      for (const bm of allBookmarks) {
-          const book = books.find(b => b.id === bm.bookId);
-          if (book && book.pages && book.pages[bm.pageIndex]) {
-              pages.push(book.pages[bm.pageIndex]);
+  const handleOpenBookmark = (book: Book, pageIndex: number) => {
+      // We need to set the book's progress to the bookmark page
+      // But we don't want to persist this jump as "Reading Progress" immediately until they read.
+      // For simplicity, we just update the book state in memory to start at that page.
+      // However, ReaderView uses `readingProgress.currentPageIndex` or 0.
+      
+      // We'll create a transient copy of the book with modified progress
+      const transientBook = {
+          ...book,
+          readingProgress: {
+              ...(book.readingProgress || { bookId: book.id, totalPages: book.pageCount, percentage: 0, status: 'unread', lastReadAt: Date.now() }),
+              currentPageIndex: pageIndex
           }
-      }
-      if (pages.length === 0) {
-           alert("Could not load bookmarked pages (files might be in another library).");
-           return;
-      }
-      const virtualBook: Book = {
-          id: 'collected-moments',
-          title: 'Collected Moments',
-          path: 'virtual',
-          pageCount: pages.length,
-          format: 'image_folder',
-          addedAt: Date.now(),
-          pages: pages,
-          handle: { kind: 'directory', name: 'Virtual' } as any, // Dummy
-          coverHandle: null
       };
-      onOpenVirtualBook(virtualBook);
+      // We can't just pass this to onOpenVirtualBook, we need to pass it to the main reader
+      // The main reader state takes ID. 
+      // A trick is to update the DB progress *before* opening.
+      dbUpdateBook({ ...book, readingProgress: transientBook.readingProgress } as any).then(() => {
+          onSelectBook(book.id);
+      });
   };
 
   // --- Render Sections ---
 
   const renderCollections = () => (
-      <div className="pb-32 pt-8">
+      <div className="pb-40 pt-40 px-12 md:px-20">
           {viewMode === 'category' && !search ? (
               <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
-                  <div className="px-8 mb-12">
+                  <div className="mb-16">
                       {currentPath && (
-                          <div className="flex items-baseline gap-4 mb-12">
-                             <button onClick={() => setCurrentPath(currentPath.split('/').slice(0, -1).join('/'))} className="group flex items-center gap-2 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors">
-                                 <ChevronLeft className="w-4 h-4" />
-                                 <span className="mono text-xs uppercase tracking-widest">Back</span>
+                          <div className="flex items-center gap-4 mb-8">
+                             <button onClick={() => setCurrentPath(currentPath.split('/').slice(0, -1).join('/'))} className="group flex items-center gap-2 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors glass-panel px-4 py-2 rounded-full">
+                                 <ChevronLeft className="w-4 h-4" strokeWidth={1} />
+                                 <span className="text-xs font-semibold tracking-wide">Back</span>
                              </button>
-                             <h1 className="text-4xl font-serif text-[var(--text-main)]">{currentPath.split('/').pop()?.replace(/[_-]/g, ' ')}</h1>
+                             <h1 className="text-2xl font-semibold text-[var(--text-main)]">{currentPath.split('/').pop()?.replace(/[_-]/g, ' ')}</h1>
                           </div>
                       )}
                   </div>
                   {categorizedGroups.map((group) => (
-                      <div key={group.originalPath} className="mb-12 px-8">
-                           <div className="flex items-baseline gap-4 mb-6 cursor-pointer group border-b border-[var(--border-color)] pb-2" onClick={() => setCurrentPath(group.originalPath)}>
-                                <h2 className="text-2xl font-serif text-[var(--text-main)] flex items-center gap-2">
-                                    <Folder className={`w-4 h-4 ${favoriteFolders.has(group.originalPath) ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`} />
+                      <div key={group.originalPath} className="mb-20">
+                           <div className="flex items-center gap-4 mb-8 cursor-pointer group" onClick={() => setCurrentPath(group.originalPath)}>
+                                <h2 className="text-lg font-semibold text-[var(--text-main)] flex items-center gap-3">
+                                    <Folder className={`w-5 h-5 ${favoriteFolders.has(group.originalPath) ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`} strokeWidth={1} />
                                     {group.title}
                                 </h2>
-                                <span className="mono text-[10px] text-[var(--text-muted)] opacity-0 group-hover:opacity-100 transition-opacity">Open Folder</span>
+                                <span className="text-[10px] text-[var(--text-muted)] opacity-0 group-hover:opacity-100 transition-opacity tracking-widest uppercase">Open Folder</span>
                            </div>
-                           <div className="flex overflow-x-auto gap-6 pb-4 scrollbar-hide -mx-4 px-4 py-8">
+                           <div className="flex overflow-x-auto gap-8 pb-8 scrollbar-hide -mx-2 px-2">
                                {group.books.map(b => (
-                                   <BookCard key={b.id} book={b} width={180} height={270} onClick={() => onSelectBook(b.id)} onContextMenu={handleContextMenu} />
+                                   <BookCard key={b.id} book={b} width={200} height={300} onClick={() => onSelectBook(b.id)} onContextMenu={handleContextMenu} />
                                ))}
                            </div>
                       </div>
                   ))}
                   {currentFolderBooks.length > 0 && (
-                      <div className="px-8 mt-12">
-                          <h2 className="mono text-xs text-[var(--text-muted)] uppercase tracking-widest mb-8">Items</h2>
-                          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-x-8 gap-y-12">
+                      <div className="mt-16">
+                          <h2 className="text-[10px] text-[var(--text-muted)] uppercase tracking-[0.2em] mb-10 pl-2">Items</h2>
+                          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-x-12 gap-y-16">
                               {currentFolderBooks.map(book => (
-                                  <div key={book.id} className="flex flex-col gap-3 group">
+                                  <div key={book.id} className="flex flex-col gap-4 group">
                                       <BookCard book={book} width="100%" height="auto" onClick={() => onSelectBook(book.id)} onContextMenu={handleContextMenu} />
-                                      <p className="font-serif text-sm text-[var(--text-muted)] group-hover:text-[var(--text-main)] leading-tight">{book.title}</p>
+                                      <p className="font-medium text-sm text-[var(--text-muted)] group-hover:text-[var(--text-main)] transition-colors leading-tight">{book.title}</p>
                                   </div>
                               ))}
                           </div>
@@ -334,12 +352,12 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                   )}
               </div>
           ) : (
-              <div className="px-8 md:px-12">
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-x-8 gap-y-16">
+              <div>
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-x-12 gap-y-20">
                       {(search ? sortedBooks : currentFolderBooks).map(book => (
-                          <div key={book.id} className="flex flex-col gap-3 group">
+                          <div key={book.id} className="flex flex-col gap-4 group">
                               <BookCard book={book} width="100%" height="auto" onClick={() => onSelectBook(book.id)} onContextMenu={handleContextMenu} />
-                              <p className="font-serif text-sm text-[var(--text-muted)] group-hover:text-[var(--text-main)] leading-tight">{book.title}</p>
+                              <p className="font-medium text-sm text-[var(--text-muted)] group-hover:text-[var(--text-main)] transition-colors leading-tight">{book.title}</p>
                           </div>
                       ))}
                   </div>
@@ -349,48 +367,45 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   );
 
   const renderCurations = () => (
-      <div className="px-8 pt-8 pb-32 animate-in fade-in slide-in-from-bottom-4 duration-500">
-          <div className="flex items-center justify-between mb-8">
-              <h2 className="text-3xl font-serif text-[var(--text-main)]">Your Curations</h2>
-              <button onClick={() => { setBookToCurate(null); setIsCurationModalOpen(true); }} className="flex items-center gap-2 px-4 py-2 bg-[var(--bg-card)] border border-[var(--border-color)] rounded-full hover:bg-[var(--text-main)] hover:text-[var(--bg-main)] transition-colors shadow-sm">
-                  <Plus className="w-4 h-4" /> <span className="mono text-xs uppercase">New Curation</span>
+      <div className="px-12 md:px-20 pt-40 pb-40 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <div className="flex items-center justify-between mb-12">
+              <h2 className="text-2xl font-semibold text-[var(--text-main)] tracking-tight">Curations</h2>
+              <button onClick={() => { setBookToCurate(null); setIsCurationModalOpen(true); }} className="flex items-center gap-2 px-5 py-2 glass-panel rounded-full hover:bg-[var(--text-main)] hover:text-[var(--bg-main)] transition-colors">
+                  <Plus className="w-4 h-4" /> <span className="text-xs font-semibold uppercase tracking-wide">New</span>
               </button>
           </div>
-          <div className="space-y-12">
-              {/* Favorites - Permanent Curation */}
+          <div className="space-y-20">
               <div className="relative">
-                  <div className="flex items-center gap-4 mb-6 border-b border-[var(--border-color)] pb-2">
-                      <h3 className="text-xl font-serif flex items-center gap-2 text-[var(--accent)]">
-                          <Heart className="w-5 h-5 fill-current" />
+                  <div className="flex items-center gap-4 mb-8">
+                      <h3 className="text-lg font-medium flex items-center gap-3 text-[var(--accent)]">
+                          <Heart className="w-4 h-4 fill-current" strokeWidth={1} />
                           Favorites
                       </h3>
-                      <span className="mono text-xs text-[var(--text-muted)]">{favoriteBooks.length} items</span>
+                      <span className="text-xs text-[var(--text-muted)]">{favoriteBooks.length}</span>
                   </div>
-                  <div className="flex overflow-x-auto gap-6 pb-4 scrollbar-hide -mx-4 px-4 py-8">
-                      {favoriteBooks.length === 0 && <div className="text-[var(--text-muted)] italic px-4 text-sm">No favorites yet. Heart a book to add it here.</div>}
+                  <div className="flex overflow-x-auto gap-8 pb-4 scrollbar-hide -mx-2 px-2">
+                      {favoriteBooks.length === 0 && <div className="text-[var(--text-muted)] italic px-2 text-sm">No favorites yet.</div>}
                       {favoriteBooks.map(b => (
-                          <BookCard key={b.id} book={b} width={160} height={240} onClick={() => onSelectBook(b.id)} onContextMenu={handleContextMenu} />
+                          <BookCard key={b.id} book={b} width={180} height={270} onClick={() => onSelectBook(b.id)} onContextMenu={handleContextMenu} />
                       ))}
                   </div>
               </div>
 
-              {/* Custom Playlists */}
               {playlists.map(pl => (
                   <div key={pl.id} className="relative">
-                      <div className="flex items-center gap-4 mb-6 border-b border-[var(--border-color)] pb-2">
-                          <h3 className="text-xl font-serif flex items-center gap-2">
-                              <FolderHeart className="w-5 h-5 text-[var(--accent)]" />
+                      <div className="flex items-center gap-4 mb-8">
+                          <h3 className="text-lg font-medium flex items-center gap-3">
+                              <FolderHeart className="w-4 h-4 text-[var(--accent)]" strokeWidth={1} />
                               {pl.name}
                           </h3>
-                          <span className="mono text-xs text-[var(--text-muted)]">{pl.bookIds.length} items</span>
-                          <button onClick={() => handleDeletePlaylist(pl.id)} className="ml-auto text-red-500 hover:text-red-400 opacity-50 hover:opacity-100 transition-opacity"><Trash2 className="w-4 h-4"/></button>
+                          <span className="text-xs text-[var(--text-muted)]">{pl.bookIds.length}</span>
+                          <button onClick={() => handleDeletePlaylist(pl.id)} className="ml-auto text-red-500 hover:text-red-400 opacity-30 hover:opacity-100 transition-opacity"><Trash2 className="w-4 h-4" strokeWidth={1}/></button>
                       </div>
-                      <div className="flex overflow-x-auto gap-6 pb-4 scrollbar-hide -mx-4 px-4 py-8">
-                          {pl.bookIds.length === 0 && <div className="text-[var(--text-muted)] italic px-4 text-sm">Empty curation. Right click a book to add it.</div>}
+                      <div className="flex overflow-x-auto gap-8 pb-4 scrollbar-hide -mx-2 px-2">
                           {pl.bookIds.map(id => {
                               const b = books.find(book => book.id === id);
                               if (!b) return null;
-                              return <BookCard key={b.id} book={b} width={160} height={240} onClick={() => onSelectBook(b.id)} onContextMenu={handleContextMenu} />
+                              return <BookCard key={b.id} book={b} width={180} height={270} onClick={() => onSelectBook(b.id)} onContextMenu={handleContextMenu} />
                           })}
                       </div>
                   </div>
@@ -399,64 +414,82 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       </div>
   );
 
-  const renderBookmarks = () => (
-      <div className="px-8 pt-8 pb-32 animate-in fade-in slide-in-from-bottom-4 duration-500">
-          <h2 className="text-3xl font-serif text-[var(--text-main)] mb-8">Page Bookmarks</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-x-8 gap-y-12">
-               
-               {/* Collected Moments Card */}
-               <div 
-                  onClick={handleOpenCollectedMoments}
-                  className="flex flex-col gap-3 group cursor-pointer"
-               >
-                   <div className="relative w-full aspect-[2/3] bg-[var(--bg-card)] border border-[var(--border-color)] shadow-md group-hover:shadow-xl group-hover:scale-105 transition-all duration-300 flex items-center justify-center overflow-hidden">
-                       <div className="absolute inset-0 bg-gradient-to-br from-[var(--accent)] to-purple-900 opacity-20 group-hover:opacity-30 transition-opacity" />
-                       <Sparkles className="w-12 h-12 text-[var(--text-main)] opacity-50 mb-2" />
-                       <span className="absolute bottom-4 font-serif text-[var(--text-main)] text-lg">Collected Moments</span>
-                       <div className="absolute inset-0 border-2 border-[var(--accent)] opacity-10 m-2" />
-                   </div>
-                   <p className="font-serif text-sm text-[var(--text-muted)] group-hover:text-[var(--text-main)] flex items-center gap-2">
-                      <Bookmark className="w-3 h-3" />
-                      {bookmarkCount} Saved Pages
-                   </p>
-               </div>
-          </div>
-      </div>
-  );
+  const renderBookmarks = () => {
+      // Filter bookmarks for existing books only
+      const validBookmarks = rawBookmarks.filter(bm => books.some(b => b.id === bm.bookId));
+
+      return (
+        <div className="px-12 md:px-20 pt-40 pb-40 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <h2 className="text-2xl font-semibold text-[var(--text-main)] mb-12 tracking-tight">Bookmarks</h2>
+            {validBookmarks.length === 0 ? (
+                 <div className="text-[var(--text-muted)] italic text-sm">No bookmarks yet. Right click in reader to add one.</div>
+            ) : (
+                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-x-12 gap-y-16">
+                    {validBookmarks.map(bm => {
+                        const book = books.find(b => b.id === bm.bookId);
+                        if(!book) return null;
+                        return (
+                            <BookmarkThumbnail 
+                                key={bm.id} 
+                                book={book} 
+                                pageIndex={bm.pageIndex} 
+                                onClick={() => handleOpenBookmark(book, bm.pageIndex)} 
+                            />
+                        );
+                    })}
+                </div>
+            )}
+        </div>
+      );
+  };
 
   return (
     <div className="flex flex-col h-full bg-[var(--bg-main)] transition-colors duration-700 relative">
       
-      {/* Search Overlay */}
+      {/* Zen Search Bar Overlay */}
       {isSearchOpen && (
-          <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[90] w-full max-w-2xl px-4 animate-in fade-in slide-in-from-top-4 duration-300">
-              <div className="bg-[var(--bg-card)]/90 backdrop-blur-md border border-[var(--border-color)] rounded-2xl shadow-2xl flex items-center p-4 gap-4 ring-1 ring-[var(--text-main)]/10">
-                  <Search className="w-6 h-6 text-[var(--accent)]" />
-                  <input ref={searchInputRef} type="text" placeholder="Search..." value={search} onChange={(e) => setSearch(e.target.value)} className="flex-1 bg-transparent text-xl font-serif text-[var(--text-main)] placeholder-[var(--text-muted)] focus:outline-none" />
-                  <button onClick={() => onToggleSearch(false)}><X className="w-5 h-5 text-[var(--text-muted)]" /></button>
+          <div className="fixed top-32 left-1/2 -translate-x-1/2 z-[90] w-full max-w-xl px-4 animate-in fade-in slide-in-from-top-4 duration-300">
+              <div className="glass-panel rounded-full flex items-center px-6 py-4 gap-4 shadow-2xl">
+                  <Search className="w-5 h-5 text-[var(--accent)]" strokeWidth={1} />
+                  <input ref={searchInputRef} type="text" placeholder="Search library..." value={search} onChange={(e) => setSearch(e.target.value)} className="flex-1 bg-transparent text-lg font-medium text-[var(--text-main)] placeholder-[var(--text-muted)] focus:outline-none" />
+                  <button onClick={() => onToggleSearch(false)}><X className="w-5 h-5 text-[var(--text-muted)]" strokeWidth={1} /></button>
               </div>
           </div>
       )}
 
-      {/* Header with Tabs */}
-      <header className={`fixed top-0 left-0 right-0 z-40 h-24 flex items-center justify-between px-8 glass-panel border-b border-[var(--border-color)]`}>
-         <div className="flex items-center gap-6">
-            <button onClick={onGoHome} className="mono text-xs uppercase tracking-widest text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors flex items-center gap-2">
-                <Folder className="w-4 h-4" /> Home
-            </button>
-         </div>
+      {/* FLOATING PILL NAVIGATION (Replaces stiff header) */}
+      <div className="fixed top-8 left-1/2 -translate-x-1/2 z-40 flex items-center justify-center pointer-events-none">
+          <div className="glass-panel p-1.5 rounded-full flex items-center gap-2 pointer-events-auto shadow-[var(--shadow-zen)]">
+             
+             {/* Home Button */}
+             <button onClick={onGoHome} className="w-10 h-10 rounded-full flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-card)] transition-colors" title="Home">
+                <Home className="w-4 h-4" strokeWidth={1.5} />
+             </button>
 
-         {/* Central Tabs */}
-         <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-8">
-             <button onClick={() => { setActiveTab('collections'); if(enableSfx) playClickSfx(); }} className={`text-sm font-serif transition-colors ${activeTab === 'collections' ? 'text-[var(--text-main)] border-b border-[var(--accent)] pb-1' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}>Collections</button>
-             <button onClick={() => { setActiveTab('curations'); if(enableSfx) playClickSfx(); }} className={`text-sm font-serif transition-colors ${activeTab === 'curations' ? 'text-[var(--text-main)] border-b border-[var(--accent)] pb-1' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}>Curations</button>
-             <button onClick={() => { setActiveTab('bookmarks'); if(enableSfx) playClickSfx(); }} className={`text-sm font-serif transition-colors ${activeTab === 'bookmarks' ? 'text-[var(--text-main)] border-b border-[var(--accent)] pb-1' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}>Bookmarks</button>
-         </div>
+             <div className="w-[1px] h-4 bg-[var(--border-glass)] mx-1" />
 
-         <div className="w-24"></div> 
-      </header>
+             {/* Tab Switcher */}
+             {['collections', 'curations', 'bookmarks'].map(tab => (
+                 <button 
+                    key={tab}
+                    onClick={() => { setActiveTab(tab as Tab); if(enableSfx) playClickSfx(); }} 
+                    className={`px-5 py-2 rounded-full text-xs font-semibold tracking-wide transition-all ${activeTab === tab ? 'bg-[var(--text-main)] text-[var(--bg-main)] shadow-sm' : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-card)]'}`}
+                 >
+                    {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                 </button>
+             ))}
 
-      <div className="flex-1 overflow-y-auto pt-24 scroll-smooth">
+             <div className="w-[1px] h-4 bg-[var(--border-glass)] mx-1" />
+
+             {/* Search Trigger */}
+             <button onClick={() => onToggleSearch(!isSearchOpen)} className="w-10 h-10 rounded-full flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-card)] transition-colors" title="Search">
+                <Search className="w-4 h-4" strokeWidth={1.5} />
+             </button>
+
+          </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto scroll-smooth">
           {activeTab === 'collections' && renderCollections()}
           {activeTab === 'curations' && renderCurations()}
           {activeTab === 'bookmarks' && renderBookmarks()}
@@ -468,10 +501,6 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
         playlists={playlists}
         onAddToCuration={handleAddToCuration}
       />
-      
-      {editingBookId && books.find(b => b.id === editingBookId) && (
-          <EditBookModal book={books.find(b => b.id === editingBookId)!} isOpen={true} onClose={() => setEditingBookId(null)} onSave={onUpdateBook} />
-      )}
     </div>
   );
 };

@@ -10,7 +10,7 @@
     <!-- Premium Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,400&family=Inter:wght@200;300;400;500&family=JetBrains+Mono:wght@300&family=Noto+Serif+JP:wght@700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,400&family=JetBrains+Mono:wght@300&family=Noto+Serif+JP:wght@700&display=swap" rel="stylesheet">
 
     <style>
       /* --- GLOBAL TEXTURES --- */
@@ -24,8 +24,7 @@
         transition: opacity 1s ease;
       }
 
-      /* Fine Manga Paper Texture */
-      /* Static noise with multiply blend for fibrous feel */
+      /* 1. Manga Paper (Existing) */
       body[data-texture="paper"] .texture-layer.paper {
         opacity: 0.6;
         background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.4'/%3E%3C/svg%3E");
@@ -33,17 +32,93 @@
         filter: contrast(120%) brightness(105%);
       }
 
-      /* Lighting */
+      /* 2. Washi (Rice Paper) - Organic fibers */
+      body[data-texture="washi"] .texture-layer.washi {
+        opacity: 0.5;
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='washiNoise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.6' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0.5 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23washiNoise)' opacity='0.3'/%3E%3C/svg%3E");
+        mix-blend-mode: overlay;
+        filter: contrast(110%);
+      }
+
+      /* 3. Halftone - Comic dots */
+      body[data-texture="halftone"] .texture-layer.halftone {
+        opacity: 0.15;
+        background-image: radial-gradient(#000 0.8px, transparent 0.8px), radial-gradient(#000 0.8px, transparent 0.8px);
+        background-size: 4px 4px;
+        background-position: 0 0, 2px 2px;
+        mix-blend-mode: multiply;
+      }
+
+      /* 4. Canvas - Fabric weave */
+      body[data-texture="canvas"] .texture-layer.canvas {
+        opacity: 0.25;
+        background-image: url("data:image/svg+xml,%3Csvg width='4' height='4' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 0h4v4H0zm2 2h2v2H2z' fill='%23888' fill-opacity='0.4'/%3E%3C/svg%3E");
+        mix-blend-mode: multiply;
+      }
+
+      /* 5. Stipple - Ink Dots */
+      body[data-texture="stipple"] .texture-layer.stipple {
+        opacity: 0.4;
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='stipple'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.2' numOctaves='1' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23stipple)'/%3E%3C/svg%3E");
+        mix-blend-mode: overlay;
+        filter: contrast(150%);
+      }
+
+      /* 6. Linen - Fine weave */
+      body[data-texture="linen"] .texture-layer.linen {
+        opacity: 0.3;
+        background: repeating-linear-gradient(45deg, transparent, transparent 1px, rgba(0,0,0,0.03) 1px, rgba(0,0,0,0.03) 2px), repeating-linear-gradient(-45deg, transparent, transparent 1px, rgba(0,0,0,0.03) 1px, rgba(0,0,0,0.03) 2px);
+        mix-blend-mode: multiply;
+      }
+
+      /* --- LIGHTING MODES --- */
+
+      /* Default Ambient */
+      body[data-lighting="ambient"] { --bg-overlay: transparent; }
+
+      /* Spotlight */
       .spotlight-mask {
         position: fixed;
         inset: 0;
         pointer-events: none;
         z-index: 9997;
-        background: radial-gradient(circle at var(--cursor-x, 50%) var(--cursor-y, 50%), transparent 100px, rgba(0,0,0,0.85) 600px);
+        background: radial-gradient(circle at var(--cursor-x, 50%) var(--cursor-y, 50%), transparent 100px, rgba(0,0,0,0.95) 600px);
         opacity: 0;
         transition: opacity 0.5s ease;
       }
       body[data-lighting="spotlight"] .spotlight-mask { opacity: 1; }
+
+      /* Midnight */
+      body[data-lighting="midnight"] { 
+        --bg-main: #000000;
+        --text-main: #666;
+        --bg-card: #111;
+      }
+
+      /* Dim */
+      body[data-lighting="dim"] .lighting-layer {
+          background: rgba(0,0,0,0.3);
+          pointer-events: none;
+      }
+
+      /* Paper (Warm) */
+      body[data-lighting="paper"] {
+          --bg-main: #FDFBF7;
+          --text-main: #4A4A4A;
+      }
+      body[data-lighting="paper"] .lighting-layer {
+          background: rgba(255, 240, 220, 0.1);
+          mix-blend-mode: multiply;
+          pointer-events: none;
+      }
+      
+      /* Cinema (Letterbox feel / Darkened UI) */
+      body[data-lighting="cinema"] {
+          --bg-main: #050505;
+          --text-main: #444;
+      }
+
+      /* Immersive handled in React via background image */
 
       /* --- PAGE TRANSITIONS --- */
 
@@ -86,7 +161,8 @@
       * { scrollbar-width: none; }
       
       body {
-        font-family: 'Inter', -apple-system, sans-serif;
+        /* San Francisco / System Font Priority */
+        font-family: -apple-system, BlinkMacSystemFont, "San Francisco", "Helvetica Neue", sans-serif;
         background-color: var(--bg-main);
         color: var(--text-main);
         transition: background-color 0.8s cubic-bezier(0.2, 0.8, 0.2, 1), color 0.8s ease;
@@ -95,105 +171,82 @@
       }
       
       h1, h2, h3, h4, h5, h6, .serif {
-        font-family: 'Cormorant Garamond', serif;
+         font-family: -apple-system, BlinkMacSystemFont, "San Francisco", "Helvetica Neue", sans-serif;
+        letter-spacing: -0.02em;
       }
       
       .mono {
         font-family: 'JetBrains Mono', monospace;
       }
+      
+      .elegant-serif {
+        font-family: 'Cormorant Garamond', serif;
+      }
 
-      /* --- THEMES --- */
+      /* Dreamlike Gradient */
+      .dream-gradient {
+        background: linear-gradient(135deg, #e0c3fc 0%, #8ec5fc 100%);
+        background-size: 200% 200%;
+        animation: dreamFlow 15s ease infinite;
+      }
+      
+      @keyframes dreamFlow {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+      }
+
+      /* --- ZEN THEME SYSTEM --- */
       :root {
         --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
-        --bg-main: #0a0a0a;       
-        --bg-card: #141414;       
-        --bg-overlay: rgba(10, 10, 10, 0.85);
-        --text-main: #e5e5e5;     
-        --text-muted: #737373;    
-        --border-color: #262626;  
-        --accent: #ffffff;        
-        --shadow-elevation: 0 30px 60px -12px rgba(0, 0, 0, 0.9);
+        
+        /* Zen Dark (Default) */
+        --bg-main: #0F0F11;
+        --bg-glass: rgba(20, 20, 24, 0.55);
+        --bg-card: rgba(30, 30, 35, 0.4);
+        --bg-overlay: rgba(15, 15, 17, 0.8);
+        --border-glass: rgba(255, 255, 255, 0.06);
+        
+        --text-main: #FFFFFF;
+        --text-muted: #888899;
+        
+        --accent: #FFFFFF; /* Monochromatic Zen */
+        
+        --shadow-zen: 0 40px 80px -20px rgba(0,0,0,0.6);
+        --glass-blur: 30px;
       }
 
-      html[data-theme="ivory-paper"] {
-        --bg-main: #f2efe9;       
-        --bg-card: #fdfbf7;       
-        --bg-overlay: rgba(242, 239, 233, 0.92);
-        --text-main: #2c2925;     
-        --text-muted: #8a847c;    
-        --border-color: #dcd6ce;
-        --accent: #d94e28;     
-        --shadow-elevation: 0 20px 40px -10px rgba(44, 41, 37, 0.08);
-      }
-      html[data-theme="ink-blossom"] {
-        --bg-main: #ffffff;
-        --bg-card: #ffffff;
-        --bg-overlay: rgba(255, 255, 255, 0.98);
-        --text-main: #000000;
-        --text-muted: #666666;
-        --border-color: #000000;
-        --accent: #000000;        
-        --shadow-elevation: 8px 8px 0px rgba(0,0,0,1); 
-      }
-      html[data-theme="cyber-grid"] {
-        --bg-main: #050510;
-        --bg-card: #0a0a1f;
-        --bg-overlay: rgba(5, 5, 16, 0.85);
-        --text-main: #00f0ff;
-        --text-muted: #4d4d80;
-        --border-color: #1a1a40;
-        --accent: #ff003c;
-        --shadow-elevation: 0 0 20px rgba(0, 240, 255, 0.1);
-      }
-      html[data-theme="autumn-scroll"] {
-        --bg-main: #2d2420;
-        --bg-card: #3a302a;
-        --bg-overlay: rgba(45, 36, 32, 0.9);
-        --text-main: #e8dcc5;
-        --text-muted: #9c8c74;
-        --border-color: #594a42;
-        --accent: #d47e33;
-        --shadow-elevation: 0 20px 50px -10px rgba(0,0,0,0.5);
-      }
-      html[data-theme="nordic-frost"] {
-        --bg-main: #eef2f5;
-        --bg-card: #ffffff;
-        --bg-overlay: rgba(238, 242, 245, 0.85);
-        --text-main: #2c3e50;
-        --text-muted: #95a5a6;
-        --border-color: #cbd5e1;
-        --accent: #3498db;
-        --shadow-elevation: 0 10px 30px -5px rgba(52, 152, 219, 0.15);
+      html[data-theme="zen-light"] {
+        --bg-main: #F4F4F5;
+        --bg-glass: rgba(255, 255, 255, 0.4);
+        --bg-card: rgba(255, 255, 255, 0.3);
+        --bg-overlay: rgba(244, 244, 245, 0.8);
+        --border-glass: rgba(0, 0, 0, 0.04);
+        
+        --text-main: #18181B;
+        --text-muted: #71717A;
+        
+        --accent: #000000;
+        
+        --shadow-zen: 0 30px 60px -15px rgba(0,0,0,0.1);
       }
       
+      /* --- UTILITIES --- */
       .glass-panel {
-        background: var(--bg-overlay);
+        background: var(--bg-glass);
+        backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+        border: 1px solid var(--border-glass);
+        box-shadow: var(--shadow-zen);
+      }
+      
+      .glass-card {
+        background: var(--bg-card);
         backdrop-filter: blur(20px);
         -webkit-backdrop-filter: blur(20px);
+        border: 1px solid var(--border-glass);
       }
 
-      /* Hanko Stamp Animation */
-      @keyframes stamp-slam {
-        0% { transform: scale(3) rotate(15deg); opacity: 0; }
-        50% { transform: scale(0.9) rotate(-5deg); opacity: 1; }
-        70% { transform: scale(1.1) rotate(-5deg); }
-        100% { transform: scale(1) rotate(-5deg); opacity: 0.8; }
-      }
-      .hanko-seal {
-        animation: stamp-slam 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
-        font-family: 'Noto Serif JP', serif;
-        mix-blend-mode: multiply;
-        border: 4px solid #d00;
-        color: #d00;
-        mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.5' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.5'/%3E%3C/svg%3E");
-      }
-      
-      /* Digital Patina */
-      .patina-crease {
-        background: linear-gradient(135deg, transparent 90%, rgba(0,0,0,0.1) 95%, rgba(0,0,0,0.2) 100%);
-        pointer-events: none;
-      }
-      
       /* Loader */
       @keyframes pulse-ring {
         0% { transform: scale(0.8); opacity: 0.5; }
@@ -231,8 +284,16 @@
   <body class="antialiased overflow-hidden" data-texture="paper" data-lighting="ambient">
     
     <div class="texture-layer paper"></div>
+    <div class="texture-layer washi"></div>
+    <div class="texture-layer halftone"></div>
+    <div class="texture-layer canvas"></div>
+    <div class="texture-layer stipple"></div>
+    <div class="texture-layer linen"></div>
     
+    <!-- Lighting Layer (Global) -->
+    <div class="lighting-layer fixed inset-0 z-[9995] pointer-events-none transition-all duration-700"></div>
     <div class="spotlight-mask"></div>
+
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
   </body>
