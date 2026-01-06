@@ -6,10 +6,11 @@ import { ReaderView } from './components/ReaderView';
 import { LibraryList } from './components/LibraryList';
 import { AppShell } from './components/AppShell';
 import { RadialMenu } from './components/RadialMenu';
+import { CurationModal } from './components/CurationModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { AppState, Library, BookMetadata, ReadingProgress, Theme, ReaderSettings, LibraryViewMode } from './types';
+import { AppState, Library, BookMetadata, ReadingProgress, Theme, ReaderSettings, LibraryViewMode, Book, Playlist } from './types';
 import { LibraryScanner } from './services/libraryScanner';
-import { initDB, dbGetLibraries, dbAddLibrary, dbDeleteLibrary, dbGetBooksForLibrary, dbGetAllProgress, dbUpdateBook, dbSaveProgress, dbGetSetting, dbSaveSetting, dbGetReaderSettings, dbSaveReaderSettings } from './services/db';
+import { initDB, dbGetLibraries, dbAddLibrary, dbDeleteLibrary, dbGetBooksForLibrary, dbGetAllProgress, dbUpdateBook, dbSaveProgress, dbGetSetting, dbSaveSetting, dbGetReaderSettings, dbSaveReaderSettings, dbGetPlaylists, dbAddBookToPlaylist, dbCreatePlaylist } from './services/db';
 import { hydrateBook, verifyPermission } from './services/fileSystem';
 import { processLegacyFileList, scanFilesFromDataTransfer } from './utils/fileSystemPolyfill';
 import { playClickSfx, playHoverSfx, setAtmosphere } from './services/audio';
@@ -27,20 +28,38 @@ const SakuraApp: React.FC = () => {
     theme: 'sakura-night'
   });
 
+  // Extra state for features
   const [settings, setSettings] = useState<ReaderSettings>({
       direction: 'LTR', fitMode: 'contain', viewMode: 'vertical', 
       slideshowInterval: 3, smartSplit: false,
       enableSfx: true, textureMode: 'grain', transitionMode: 'slide',
       atmosphere: 'none', lightingMode: 'ambient'
   });
-  
   const [libViewMode, setLibViewMode] = useState<LibraryViewMode>('category');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  
+  // Curation Modal State
+  const [curationModalOpen, setCurationModalOpen] = useState(false);
+  const [bookToCurate, setBookToCurate] = useState<string | null>(null);
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+
+  // Reader Actions State (for Menu)
+  const [bookmarkAction, setBookmarkAction] = useState<(() => void) | null>(null);
+  const [isPageBookmarked, setIsPageBookmarked] = useState(false);
+
+  // Virtual Book State (Collected Moments)
+  const [virtualBook, setVirtualBook] = useState<Book | null>(null);
+
   const legacyInputRef = useRef<HTMLInputElement>(null);
 
   const refreshLibraries = useCallback(async () => {
     const libs = await dbGetLibraries();
     return libs;
+  }, []);
+
+  const refreshPlaylists = useCallback(async () => {
+      const pl = await dbGetPlaylists();
+      setPlaylists(pl);
   }, []);
 
   // Initialization
@@ -54,16 +73,14 @@ const SakuraApp: React.FC = () => {
             dbGetReaderSettings()
         ]);
         
+        await refreshPlaylists();
+        
         const initialTheme = savedTheme?.value || 'sakura-night';
         document.documentElement.setAttribute('data-theme', initialTheme);
         document.body.setAttribute('data-texture', savedSettings.textureMode);
         document.body.setAttribute('data-lighting', savedSettings.lightingMode);
 
         setSettings(savedSettings);
-
-        if (savedSettings.atmosphere && savedSettings.atmosphere !== 'none') {
-             // Atmosphere will start on user interaction
-        }
 
         setState(prev => ({ 
           ...prev, 
@@ -84,7 +101,7 @@ const SakuraApp: React.FC = () => {
       }
     };
     startUp();
-  }, [refreshLibraries]);
+  }, [refreshLibraries, refreshPlaylists]);
 
   useEffect(() => {
       const handleMove = (e: MouseEvent) => {
@@ -102,6 +119,12 @@ const SakuraApp: React.FC = () => {
       setState(prev => ({ ...prev, theme: newTheme }));
       document.documentElement.setAttribute('data-theme', newTheme);
       await dbSaveSetting('theme', newTheme);
+  };
+  
+  const handleCycleTheme = () => {
+       const themes: Theme[] = ['sakura-night', 'ivory-paper', 'ink-blossom', 'cyber-grid', 'autumn-scroll', 'nordic-frost'];
+       const next = themes[(themes.indexOf(state.theme) + 1) % themes.length];
+       handleToggleTheme(next);
   };
 
   const handleSettingChange = async (key: keyof ReaderSettings, value: any) => {
@@ -133,10 +156,7 @@ const SakuraApp: React.FC = () => {
   };
 
   const processNativeHandle = async (dirHandle: any) => {
-    // 1. Set loading immediately to show the spinner on Welcome Screen
     setState(prev => ({ ...prev, loading: true, loadingMessage: 'Scanning library...' }));
-    
-    // 2. Add delay to ensure React renders the loader before blocking event loop
     setTimeout(async () => {
         try {
             const libraryId = crypto.randomUUID();
@@ -281,6 +301,9 @@ const SakuraApp: React.FC = () => {
   }, []);
 
   const handleUpdateProgress = useCallback(async (bookId: string, pageIndex: number, totalPages: number) => {
+    // Skip saving progress for virtual books
+    if (bookId === 'collected-moments') return;
+
     const percentage = Math.round(((pageIndex + 1) / totalPages) * 100);
     const status = percentage >= 100 ? 'completed' : 'in_progress';
     const progress: ReadingProgress = {
@@ -320,6 +343,12 @@ const SakuraApp: React.FC = () => {
     }
   }, [state.libraryBooks, settings.enableSfx]);
 
+  const handleOpenVirtualBook = (book: Book) => {
+      if(settings.enableSfx) playClickSfx();
+      setVirtualBook(book);
+      setState(prev => ({ ...prev, activeBookId: 'collected-moments', view: 'READER' }));
+  };
+
   const handleGoHome = () => {
      if(settings.enableSfx) playClickSfx();
      setState(prev => ({ ...prev, view: 'LIBRARY_LIST', activeLibraryId: null, activeBookId: null }));
@@ -327,14 +356,32 @@ const SakuraApp: React.FC = () => {
 
   const handleCloseReader = useCallback(() => {
     if(settings.enableSfx) playClickSfx();
+    setVirtualBook(null);
     setState(prev => ({ ...prev, activeBookId: null, view: 'LIBRARY' }));
   }, [settings.enableSfx]);
 
-  const activeBook = state.libraryBooks.find(b => b.id === state.activeBookId);
+  const activeBook = state.activeBookId === 'collected-moments' ? virtualBook : state.libraryBooks.find(b => b.id === state.activeBookId);
 
   const handleBack = () => {
       if (state.view === 'READER') handleCloseReader();
       else if (state.view === 'LIBRARY') handleGoHome();
+  };
+
+  const handleAddToCuration = async (playlistId: string | null, newName?: string) => {
+      if (!bookToCurate) return;
+      let targetId = playlistId;
+
+      if (!targetId && newName) {
+          const newPl = await dbCreatePlaylist(newName);
+          targetId = newPl.id;
+      }
+
+      if (targetId) {
+          await dbAddBookToPlaylist(targetId, bookToCurate);
+          await refreshPlaylists();
+      }
+      setCurationModalOpen(false);
+      setBookToCurate(null);
   };
 
   return (
@@ -349,6 +396,18 @@ const SakuraApp: React.FC = () => {
             onSettingChange={handleSettingChange}
             viewMode={libViewMode}
             onViewModeChange={setLibViewMode}
+            activeBookId={null}
+            onToggleFavorite={async (id) => {
+                const b = state.libraryBooks.find(book => book.id === id);
+                if(b) handleUpdateBook(id, { isFavorite: !b.isFavorite });
+            }}
+            onAddToCuration={(id) => {
+                setBookToCurate(id);
+                setCurationModalOpen(true);
+            }}
+            onEditBook={() => {}}
+            onTogglePageBookmark={() => bookmarkAction && bookmarkAction()}
+            isPageBookmarked={isPageBookmarked}
         />
 
         <input type="file" ref={legacyInputRef} className="hidden" multiple onChange={handleLegacyFileSelect} {...{ webkitdirectory: "", directory: "" } as any} />
@@ -368,6 +427,8 @@ const SakuraApp: React.FC = () => {
               onUpdateProgress={handleUpdateProgress}
               settings={settings} 
               onSettingChange={handleSettingChange}
+              onRegisterBookmarkAction={setBookmarkAction}
+              onBookmarkStatusChange={setIsPageBookmarked}
             />
         ) : (
              <AppShell
@@ -376,7 +437,7 @@ const SakuraApp: React.FC = () => {
                 onSelectLibrary={handleSelectLibrary}
                 onGoHome={handleGoHome}
                 currentTheme={state.theme}
-                onToggleTheme={() => handleToggleTheme('ivory-paper')}
+                onToggleTheme={handleCycleTheme}
              >
                 {state.view === 'LIBRARY_LIST' && (
                     <LibraryList 
@@ -384,7 +445,7 @@ const SakuraApp: React.FC = () => {
                       onAddLibrary={handleAddLibrary}
                       onSelectLibrary={handleSelectLibrary}
                       onDeleteLibrary={handleDeleteLibrary}
-                      onToggleTheme={() => handleToggleTheme('ivory-paper')}
+                      onToggleTheme={handleCycleTheme}
                     />
                 )}
                 
@@ -394,15 +455,25 @@ const SakuraApp: React.FC = () => {
                       onSelectBook={handleSelectBook} 
                       onUpdateBook={handleUpdateBook}
                       onGoHome={handleGoHome}
-                      onToggleTheme={() => handleToggleTheme('ivory-paper')}
+                      onToggleTheme={handleCycleTheme}
                       viewMode={libViewMode}
                       enableSfx={settings.enableSfx}
                       isSearchOpen={isSearchOpen}
                       onToggleSearch={setIsSearchOpen}
+                      onOpenVirtualBook={handleOpenVirtualBook}
+                      playlists={playlists}
+                      onRefreshPlaylists={refreshPlaylists}
                     />
                 )}
              </AppShell>
         )}
+
+        <CurationModal 
+            isOpen={curationModalOpen}
+            onClose={() => setCurationModalOpen(false)}
+            playlists={playlists}
+            onAddToCuration={handleAddToCuration}
+        />
 
         {/* Fullscreen Blurry Loader */}
         {state.loading && state.view !== 'WELCOME' && (

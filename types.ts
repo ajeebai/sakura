@@ -118,7 +118,7 @@ export type ImageFitMode = 'contain' | 'width' | 'height' | 'original';
 export interface ReaderSettings {
     direction: ReadingDirection;
     fitMode: ImageFitMode;
-    viewMode: 'single' | 'vertical' | 'spread'; // Added 'spread'
+    viewMode: 'single' | 'vertical' | 'spread' | 'grid'; // Added 'grid'
     slideshowInterval: number; // seconds
     smartSplit: boolean; 
     

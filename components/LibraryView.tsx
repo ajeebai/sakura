@@ -1,12 +1,14 @@
 
 import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
-import { Book, LibraryViewMode, Playlist } from '../types';
+import { Book, LibraryViewMode, Playlist, BookMetadata, FileHandle, Page } from '../types';
 import { generateThumbnail, generatePdfThumbnail, generateArchiveThumbnail } from '../utils/imageUtils';
-import { dbUpdateBook, dbGetFavoriteFolders, dbGetPlaylists, dbCreatePlaylist, dbAddBookToPlaylist, dbRemoveBookFromPlaylist, dbDeletePlaylist } from '../services/db';
-import { Search, Heart, ChevronLeft, Folder, Layout, X, Plus, MoreVertical, Trash2, List } from 'lucide-react';
+import { dbUpdateBook, dbGetFavoriteFolders, dbGetPlaylists, dbCreatePlaylist, dbAddBookToPlaylist, dbDeletePlaylist, dbGetAllBookmarks, dbGetBooksForLibrary, dbGetAllProgress } from '../services/db';
+import { Search, Heart, ChevronLeft, Folder, X, Plus, MoreVertical, Trash2, FolderHeart, Sparkles } from 'lucide-react';
 import { EditBookModal } from './EditBookModal';
+import { CurationModal } from './CurationModal';
 import { naturalSort } from '../utils/fileUtils';
 import { playClickSfx, playHoverSfx } from '../services/audio';
+import { getFileUrl } from '../services/fileSystem';
 
 interface LibraryViewProps {
   books: Book[];
@@ -18,9 +20,12 @@ interface LibraryViewProps {
   enableSfx: boolean;
   isSearchOpen: boolean; 
   onToggleSearch: (open: boolean) => void;
+  onOpenVirtualBook: (book: Book) => void;
+  // New: Passed from App for sync
+  playlists: Playlist[];
+  onRefreshPlaylists: () => void;
 }
 
-// --- Digital Patina Component ---
 const PatinaOverlay: React.FC<{ readCount: number }> = ({ readCount }) => {
     if (readCount < 2) return null;
     const intensity = Math.min(1, Math.max(0, (readCount - 2) / 30)); 
@@ -30,16 +35,14 @@ const PatinaOverlay: React.FC<{ readCount: number }> = ({ readCount }) => {
                 <div className="absolute top-0 right-0 w-16 h-16 patina-crease" style={{ opacity: intensity * 0.5 }} />
             )}
             <div className="absolute inset-0 bg-yellow-100/10 mix-blend-multiply" style={{ opacity: intensity * 0.3 }} />
-            <div className="absolute inset-0 border border-white/20" style={{ boxShadow: `inset 0 0 ${20 * intensity}px rgba(0,0,0, ${0.2 * intensity})` }} />
         </div>
     );
 };
 
-// --- Book Card with Context Menu ---
 const BookCard: React.FC<{ 
     book: Book; 
     onClick: () => void;
-    onContextMenu: (e: React.MouseEvent, book: Book) => void;
+    onContextMenu?: (e: React.MouseEvent, book: Book) => void;
     width?: number | string;
     height?: number | string;
     className?: string;
@@ -66,16 +69,6 @@ const BookCard: React.FC<{
             }
         } catch (e) { /* silent */ }
       }
-      else if (book.handle && (book.format === 'pdf' || book.format === 'archive')) {
-         try {
-             const file = await (book.handle as any).getFile();
-             let thumbnailBlob = book.format === 'pdf' ? await generatePdfThumbnail(file) : await generateArchiveThumbnail(file);
-             if (thumbnailBlob) {
-                 await dbUpdateBook({ ...book, coverImage: thumbnailBlob, handle: undefined, pages: undefined, coverHandle: undefined, readingProgress: undefined } as any);
-                 if (active) setCoverUrl(URL.createObjectURL(thumbnailBlob));
-             }
-         } catch (e) { }
-      }
     };
     loadCover();
     return () => { active = false; if (coverUrl) URL.revokeObjectURL(coverUrl); };
@@ -83,29 +76,18 @@ const BookCard: React.FC<{
 
   const progress = book.readingProgress;
   const percentage = progress?.percentage || 0;
-  const readCount = book.readCount || 0;
-
-  const handleWheel = (e: React.WheelEvent) => {
-      if (e.ctrlKey && e.deltaY < -10) {
-          e.preventDefault();
-          e.stopPropagation();
-          onClick();
-      }
-  };
 
   return (
     <div 
       onClick={onClick}
-      onContextMenu={(e) => onContextMenu(e, book)}
+      onContextMenu={(e) => onContextMenu && onContextMenu(e, book)}
       onMouseEnter={() => playHoverSfx()}
-      onWheel={handleWheel}
       className={`relative flex-shrink-0 cursor-pointer group ${book.isHidden ? 'opacity-40' : 'opacity-100'} ${className || ''}`}
       style={{ width, height, ...style }}
+      data-book-id={book.id}
     >
-      <div 
-        className={`relative w-full h-full bg-[var(--bg-card)] overflow-hidden transition-all duration-300 ease-[var(--ease-out-expo)] aspect-[2/3] border border-[var(--border-color)] shadow-md group-hover:scale-110 group-hover:shadow-2xl group-hover:border-[var(--text-main)] group-hover:z-50 ${readCount > 10 ? 'patina-sunbleach' : ''}`}
-      >
-        <PatinaOverlay readCount={readCount} />
+      <div className={`relative w-full h-full bg-[var(--bg-card)] overflow-hidden transition-all duration-300 ease-[var(--ease-out-expo)] aspect-[2/3] border border-[var(--border-color)] shadow-md group-hover:scale-105 group-hover:shadow-xl group-hover:border-[var(--text-main)] group-hover:z-50 rounded-sm`}>
+        <PatinaOverlay readCount={book.readCount || 0} />
         {coverUrl ? (
           <img src={coverUrl} alt={book.title} className="w-full h-full object-cover grayscale-[0.2] contrast-[1.1] transition-all duration-1000 group-hover:grayscale-0" loading={priority ? "eager" : "lazy"} />
         ) : (
@@ -120,23 +102,21 @@ const BookCard: React.FC<{
             <div className="absolute top-2 right-2 text-[var(--accent)] drop-shadow-md z-30"><Heart className="w-3 h-3 fill-current" /></div>
         )}
         {showProgress && percentage > 0 && percentage < 100 && (
-            <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-black/20 z-30">
+            <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-black/20 z-30">
                 <div className="h-full bg-[var(--accent)]" style={{ width: `${percentage}%` }} />
             </div>
         )}
-        <div className="absolute inset-0 bg-gradient-to-tr from-white/0 via-white/10 to-white/0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none mix-blend-overlay z-40" />
       </div>
     </div>
   );
 });
 
-// --- Main Library View ---
-
 type Tab = 'collections' | 'curations' | 'bookmarks';
 
 export const LibraryView: React.FC<LibraryViewProps> = ({ 
     books, onSelectBook, onUpdateBook, onGoHome, viewMode, enableSfx,
-    isSearchOpen, onToggleSearch
+    isSearchOpen, onToggleSearch, onOpenVirtualBook,
+    playlists, onRefreshPlaylists
 }) => {
   const [activeTab, setActiveTab] = useState<Tab>('collections');
   const [search, setSearch] = useState('');
@@ -144,14 +124,13 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   const [favoriteFolders, setFavoriteFolders] = useState<Set<string>>(new Set());
   const [editingBookId, setEditingBookId] = useState<string | null>(null);
   
-  // Playlist State
-  const [playlists, setPlaylists] = useState<Playlist[]>([]);
-  const [contextMenu, setContextMenu] = useState<{ x: number, y: number, book: Book } | null>(null);
+  // Curation Modal State
+  const [isCurationModalOpen, setIsCurationModalOpen] = useState(false);
+  const [bookToCurate, setBookToCurate] = useState<string | null>(null);
 
-  // Load Initial Data
   useEffect(() => { 
       dbGetFavoriteFolders().then(folders => setFavoriteFolders(new Set(folders))); 
-      dbGetPlaylists().then(setPlaylists);
+      // Playlists passed via props now
   }, []);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -159,13 +138,6 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       if (isSearchOpen && searchInputRef.current) searchInputRef.current.focus();
       if (!isSearchOpen) setSearch('');
   }, [isSearchOpen]);
-
-  // Handle Global Click to close Context Menu
-  useEffect(() => {
-      const closeMenu = () => setContextMenu(null);
-      window.addEventListener('click', closeMenu);
-      return () => window.removeEventListener('click', closeMenu);
-  }, []);
 
   const sortedBooks = useMemo(() => {
     let filtered = books.filter(b => (b.title.toLowerCase().includes(search.toLowerCase())) && !b.isHidden);
@@ -196,32 +168,62 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   const bookmarkedBooks = useMemo(() => books.filter(b => b.isFavorite), [books]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent, book: Book) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setContextMenu({ x: e.clientX, y: e.clientY, book });
-      if(enableSfx) playClickSfx();
-  }, [enableSfx]);
+      e.preventDefault(); 
+  }, []);
 
-  const handleCreatePlaylist = async () => {
-      const name = prompt("Enter playlist name:");
-      if (name) {
-          const pl = await dbCreatePlaylist(name);
-          setPlaylists(prev => [...prev, pl]);
+  const handleAddToCuration = async (playlistId: string | null, newName?: string) => {
+      if (!bookToCurate) return;
+      let targetId = playlistId;
+
+      if (!targetId && newName) {
+          const newPl = await dbCreatePlaylist(newName);
+          targetId = newPl.id;
       }
-  };
 
-  const handleAddToPlaylist = async (playlistId: string, bookId: string) => {
-      await dbAddBookToPlaylist(playlistId, bookId);
-      const updated = await dbGetPlaylists();
-      setPlaylists(updated);
-      alert("Added to playlist");
+      if (targetId) {
+          await dbAddBookToPlaylist(targetId, bookToCurate);
+          onRefreshPlaylists();
+      }
+      setIsCurationModalOpen(false);
+      setBookToCurate(null);
   };
   
   const handleDeletePlaylist = async (id: string) => {
-      if(confirm("Delete this playlist?")) {
+      if(confirm("Delete this curation?")) {
           await dbDeletePlaylist(id);
-          setPlaylists(prev => prev.filter(p => p.id !== id));
+          onRefreshPlaylists();
       }
+  };
+
+  const handleOpenCollectedMoments = async () => {
+      const allBookmarks = await dbGetAllBookmarks();
+      if (allBookmarks.length === 0) {
+          alert("No bookmarks found yet.");
+          return;
+      }
+      const pages: Page[] = [];
+      for (const bm of allBookmarks) {
+          const book = books.find(b => b.id === bm.bookId);
+          if (book && book.pages && book.pages[bm.pageIndex]) {
+              pages.push(book.pages[bm.pageIndex]);
+          }
+      }
+      if (pages.length === 0) {
+           alert("Could not load bookmarked pages (files might be in another library).");
+           return;
+      }
+      const virtualBook: Book = {
+          id: 'collected-moments',
+          title: 'Collected Moments',
+          path: 'virtual',
+          pageCount: pages.length,
+          format: 'image_folder',
+          addedAt: Date.now(),
+          pages: pages,
+          handle: { kind: 'directory', name: 'Virtual' } as any, // Dummy
+          coverHandle: null
+      };
+      onOpenVirtualBook(virtualBook);
   };
 
   // --- Render Sections ---
@@ -250,7 +252,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                                 </h2>
                                 <span className="mono text-[10px] text-[var(--text-muted)] opacity-0 group-hover:opacity-100 transition-opacity">Open Folder</span>
                            </div>
-                           <div className="flex overflow-x-auto gap-6 pb-4 scrollbar-hide -mx-4 px-4 py-8">
+                           <div className="flex overflow-x-auto gap-6 pb-4 scrollbar-hide -mx-4 px-4 py-4">
                                {group.books.map(b => (
                                    <BookCard key={b.id} book={b} width={180} height={270} onClick={() => onSelectBook(b.id)} onContextMenu={handleContextMenu} />
                                ))}
@@ -290,20 +292,23 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       <div className="px-8 pt-8 pb-32 animate-in fade-in slide-in-from-bottom-4 duration-500">
           <div className="flex items-center justify-between mb-8">
               <h2 className="text-3xl font-serif text-[var(--text-main)]">Your Curations</h2>
-              <button onClick={handleCreatePlaylist} className="flex items-center gap-2 px-4 py-2 bg-[var(--bg-card)] border border-[var(--border-color)] rounded-full hover:bg-[var(--text-main)] hover:text-[var(--bg-main)] transition-colors">
-                  <Plus className="w-4 h-4" /> <span className="mono text-xs uppercase">New Playlist</span>
+              <button onClick={() => { setBookToCurate(null); setIsCurationModalOpen(true); }} className="flex items-center gap-2 px-4 py-2 bg-[var(--bg-card)] border border-[var(--border-color)] rounded-full hover:bg-[var(--text-main)] hover:text-[var(--bg-main)] transition-colors shadow-sm">
+                  <Plus className="w-4 h-4" /> <span className="mono text-xs uppercase">New Curation</span>
               </button>
           </div>
           <div className="space-y-12">
               {playlists.map(pl => (
                   <div key={pl.id} className="relative">
                       <div className="flex items-center gap-4 mb-6 border-b border-[var(--border-color)] pb-2">
-                          <h3 className="text-xl font-serif">{pl.name}</h3>
+                          <h3 className="text-xl font-serif flex items-center gap-2">
+                              <FolderHeart className="w-5 h-5 text-[var(--accent)]" />
+                              {pl.name}
+                          </h3>
                           <span className="mono text-xs text-[var(--text-muted)]">{pl.bookIds.length} items</span>
-                          <button onClick={() => handleDeletePlaylist(pl.id)} className="ml-auto text-red-500 hover:text-red-400"><Trash2 className="w-4 h-4"/></button>
+                          <button onClick={() => handleDeletePlaylist(pl.id)} className="ml-auto text-red-500 hover:text-red-400 opacity-50 hover:opacity-100 transition-opacity"><Trash2 className="w-4 h-4"/></button>
                       </div>
                       <div className="flex overflow-x-auto gap-6 pb-4 scrollbar-hide -mx-4 px-4">
-                          {pl.bookIds.length === 0 && <div className="text-[var(--text-muted)] italic px-4">Empty playlist</div>}
+                          {pl.bookIds.length === 0 && <div className="text-[var(--text-muted)] italic px-4 text-sm">Empty curation. Right click a book to add it.</div>}
                           {pl.bookIds.map(id => {
                               const b = books.find(book => book.id === id);
                               if (!b) return null;
@@ -318,15 +323,29 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
 
   const renderBookmarks = () => (
       <div className="px-8 pt-8 pb-32 animate-in fade-in slide-in-from-bottom-4 duration-500">
-          <h2 className="text-3xl font-serif text-[var(--text-main)] mb-8">Favorites</h2>
+          <h2 className="text-3xl font-serif text-[var(--text-main)] mb-8">Favorites & Moments</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-x-8 gap-y-12">
+               
+               {/* Collected Moments Card */}
+               <div 
+                  onClick={handleOpenCollectedMoments}
+                  className="flex flex-col gap-3 group cursor-pointer"
+               >
+                   <div className="relative w-full aspect-[2/3] bg-[var(--bg-card)] border border-[var(--border-color)] shadow-md group-hover:shadow-xl group-hover:scale-105 transition-all duration-300 flex items-center justify-center overflow-hidden">
+                       <div className="absolute inset-0 bg-gradient-to-br from-[var(--accent)] to-purple-900 opacity-20 group-hover:opacity-30 transition-opacity" />
+                       <Sparkles className="w-12 h-12 text-[var(--text-main)] opacity-50 mb-2" />
+                       <span className="absolute bottom-4 font-serif text-[var(--text-main)] text-lg">Collected Moments</span>
+                       <div className="absolute inset-0 border-2 border-[var(--accent)] opacity-10 m-2" />
+                   </div>
+                   <p className="font-serif text-sm text-[var(--text-muted)] group-hover:text-[var(--text-main)]">Virtual Compilation</p>
+               </div>
+
                {bookmarkedBooks.map(book => (
                   <div key={book.id} className="flex flex-col gap-3 group">
                       <BookCard book={book} width="100%" height="auto" onClick={() => onSelectBook(book.id)} onContextMenu={handleContextMenu} />
                       <p className="font-serif text-sm text-[var(--text-muted)] group-hover:text-[var(--text-main)] leading-tight">{book.title}</p>
                   </div>
                ))}
-               {bookmarkedBooks.length === 0 && <p className="text-[var(--text-muted)]">No favorites yet.</p>}
           </div>
       </div>
   );
@@ -337,7 +356,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       {/* Search Overlay */}
       {isSearchOpen && (
           <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[90] w-full max-w-2xl px-4 animate-in fade-in slide-in-from-top-4 duration-300">
-              <div className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl shadow-2xl flex items-center p-4 gap-4 ring-1 ring-[var(--text-main)]/10">
+              <div className="bg-[var(--bg-card)]/90 backdrop-blur-md border border-[var(--border-color)] rounded-2xl shadow-2xl flex items-center p-4 gap-4 ring-1 ring-[var(--text-main)]/10">
                   <Search className="w-6 h-6 text-[var(--accent)]" />
                   <input ref={searchInputRef} type="text" placeholder="Search..." value={search} onChange={(e) => setSearch(e.target.value)} className="flex-1 bg-transparent text-xl font-serif text-[var(--text-main)] placeholder-[var(--text-muted)] focus:outline-none" />
                   <button onClick={() => onToggleSearch(false)}><X className="w-5 h-5 text-[var(--text-muted)]" /></button>
@@ -349,7 +368,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       <header className={`fixed top-0 left-0 right-0 z-40 h-24 flex items-center justify-between px-8 glass-panel border-b border-[var(--border-color)]`}>
          <div className="flex items-center gap-6">
             <button onClick={onGoHome} className="mono text-xs uppercase tracking-widest text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors flex items-center gap-2">
-                <Layout className="w-4 h-4" /> Home
+                <Folder className="w-4 h-4" /> Home
             </button>
          </div>
 
@@ -357,7 +376,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
          <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-8">
              <button onClick={() => { setActiveTab('collections'); if(enableSfx) playClickSfx(); }} className={`text-sm font-serif transition-colors ${activeTab === 'collections' ? 'text-[var(--text-main)] border-b border-[var(--accent)] pb-1' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}>Collections</button>
              <button onClick={() => { setActiveTab('curations'); if(enableSfx) playClickSfx(); }} className={`text-sm font-serif transition-colors ${activeTab === 'curations' ? 'text-[var(--text-main)] border-b border-[var(--accent)] pb-1' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}>Curations</button>
-             <button onClick={() => { setActiveTab('bookmarks'); if(enableSfx) playClickSfx(); }} className={`text-sm font-serif transition-colors ${activeTab === 'bookmarks' ? 'text-[var(--text-main)] border-b border-[var(--accent)] pb-1' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}>Bookmarks</button>
+             <button onClick={() => { setActiveTab('bookmarks'); if(enableSfx) playClickSfx(); }} className={`text-sm font-serif transition-colors ${activeTab === 'bookmarks' ? 'text-[var(--text-main)] border-b border-[var(--accent)] pb-1' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}>Favorites</button>
          </div>
 
          <div className="w-24"></div> 
@@ -368,33 +387,14 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           {activeTab === 'curations' && renderCurations()}
           {activeTab === 'bookmarks' && renderBookmarks()}
       </div>
-      
-      {/* Context Menu */}
-      {contextMenu && (
-          <div 
-             className="fixed z-[100] bg-[var(--bg-card)] border border-[var(--border-color)] rounded-lg shadow-2xl py-2 w-48 animate-in fade-in zoom-in-95 duration-100"
-             style={{ top: contextMenu.y, left: contextMenu.x }}
-             onClick={(e) => e.stopPropagation()}
-          >
-              <div className="px-4 py-2 border-b border-[var(--border-color)] mb-2">
-                  <span className="text-xs font-serif truncate block text-[var(--text-main)]">{contextMenu.book.title}</span>
-              </div>
-              <button onClick={() => { setEditingBookId(contextMenu.book.id); setContextMenu(null); }} className="w-full text-left px-4 py-2 hover:bg-[var(--bg-overlay)] text-sm flex items-center gap-2">
-                  <MoreVertical className="w-3 h-3"/> Edit Details
-              </button>
-              <div className="h-px bg-[var(--border-color)] my-1" />
-              <div className="px-4 py-1 text-[10px] mono uppercase text-[var(--text-muted)]">Add to Playlist</div>
-              {playlists.map(pl => (
-                  <button key={pl.id} onClick={() => { handleAddToPlaylist(pl.id, contextMenu.book.id); setContextMenu(null); }} className="w-full text-left px-4 py-2 hover:bg-[var(--bg-overlay)] text-sm truncate">
-                      {pl.name}
-                  </button>
-              ))}
-              <button onClick={() => { handleCreatePlaylist(); setContextMenu(null); }} className="w-full text-left px-4 py-2 hover:bg-[var(--bg-overlay)] text-sm flex items-center gap-2 text-[var(--accent)]">
-                   <Plus className="w-3 h-3"/> New Playlist
-              </button>
-          </div>
-      )}
 
+      <CurationModal 
+        isOpen={isCurationModalOpen} 
+        onClose={() => setIsCurationModalOpen(false)}
+        playlists={playlists}
+        onAddToCuration={handleAddToCuration}
+      />
+      
       {editingBookId && books.find(b => b.id === editingBookId) && (
           <EditBookModal book={books.find(b => b.id === editingBookId)!} isOpen={true} onClose={() => setEditingBookId(null)} onSave={onUpdateBook} />
       )}
