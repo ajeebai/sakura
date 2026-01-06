@@ -314,8 +314,8 @@ export const dbGetReaderSettings = async (): Promise<ReaderSettings> => {
         enableSfx: true,
         atmosphere: 'none',
         lightingMode: 'ambient',
-        textureMode: 'grain',
-        transitionMode: 'slide'
+        textureMode: 'paper', // Default changed to paper
+        transitionMode: 'snap' // Default changed to snap
     };
     return setting ? { ...defaults, ...setting.value } : defaults;
 };

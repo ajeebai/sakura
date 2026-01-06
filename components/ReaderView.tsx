@@ -1,15 +1,19 @@
 
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useImperativeHandle, forwardRef } from 'react';
 import { Book, FileHandle, ReaderSettings } from '../types';
 import { getFileUrl } from '../services/fileSystem';
-import { Bookmark as BookmarkIcon } from 'lucide-react';
+import { Bookmark as BookmarkIcon, ChevronLeft, ChevronRight } from 'lucide-react';
 import * as pdfjsLibProxy from 'pdfjs-dist';
 import { playClickSfx, playPageTurnSfx, playThumpSfx } from '../services/audio';
-import { dbUpdateBook, dbAddBookmark, dbRemoveBookmark, dbGetBookmarksForBook } from '../services/db';
+import { dbAddBookmark, dbRemoveBookmark, dbGetBookmarksForBook } from '../services/db';
 
 const pdfjsLib: any = (pdfjsLibProxy as any).default || pdfjsLibProxy;
 if (pdfjsLib.GlobalWorkerOptions) {
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://esm.sh/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+}
+
+export interface ReaderViewHandle {
+    toggleBookmark: () => Promise<void>;
 }
 
 interface ReaderViewProps {
@@ -18,8 +22,6 @@ interface ReaderViewProps {
   onUpdateProgress: (bookId: string, pageIndex: number, totalPages: number) => void;
   settings: ReaderSettings;
   onSettingChange: (k: keyof ReaderSettings, v: any) => void;
-  // External control for bookmarks via radial menu
-  onRegisterBookmarkAction: (callback: () => void) => void;
   onBookmarkStatusChange: (isBookmarked: boolean) => void;
 }
 
@@ -28,39 +30,91 @@ interface ReaderViewProps {
 const PdfPage: React.FC<{ pdfDoc: any; pageIndex: number; isActive: boolean; className?: string }> = React.memo(({ pdfDoc, pageIndex, isActive, className }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const renderTaskRef = useRef<any>(null);
+    
     useEffect(() => {
         if (!isActive || !pdfDoc || !canvasRef.current) return;
+        
         let active = true;
         const render = async () => {
             try {
                 const page = await pdfDoc.getPage(pageIndex);
                 if (!active) return;
-                const viewport = page.getViewport({ scale: 2 });
+                
+                const viewport = page.getViewport({ scale: 2 }); // High res for zoom
                 const canvas = canvasRef.current!;
+                
+                // Avoid canvas memory limit crashes by limiting max dimensions if needed
+                // For now, standard resizing
                 canvas.width = viewport.width;
                 canvas.height = viewport.height;
+                
                 const context = canvas.getContext('2d');
-                if (renderTaskRef.current) renderTaskRef.current.cancel();
+                if (renderTaskRef.current) {
+                    renderTaskRef.current.cancel();
+                }
+                
                 renderTaskRef.current = page.render({ canvasContext: context, viewport: viewport });
                 await renderTaskRef.current.promise;
-            } catch (e: any) { }
+            } catch (e: any) {
+                // Ignore cancel errors
+            }
         };
         render();
-        return () => { active = false; if (renderTaskRef.current) renderTaskRef.current.cancel(); };
+        
+        return () => { 
+            active = false; 
+            if (renderTaskRef.current) {
+                renderTaskRef.current.cancel(); 
+                renderTaskRef.current = null;
+            }
+            // Clear canvas to free memory immediately
+            if (canvasRef.current) {
+                canvasRef.current.width = 1;
+                canvasRef.current.height = 1;
+            }
+        };
     }, [pdfDoc, pageIndex, isActive]);
+
     return <canvas ref={canvasRef} className={`bg-white shadow-sm pointer-events-none ${className}`} style={{ width: '100%', height: 'auto' }} />;
 });
 
 const LazyImagePage: React.FC<{ handle: FileHandle; isActive: boolean; alt: string; className?: string; style?: React.CSSProperties }> = React.memo(({ handle, isActive, alt, className, style }) => {
     const [src, setSrc] = useState<string | null>(null);
+
     useEffect(() => {
-        if (!isActive) { if(src) { URL.revokeObjectURL(src); setSrc(null); } return; }
+        if (!isActive) { 
+            if(src) { 
+                URL.revokeObjectURL(src); 
+                setSrc(null); 
+            } 
+            return; 
+        }
+
         let active = true;
-        getFileUrl(handle).then(url => { if(active) setSrc(url); });
-        return () => { active = false; };
+        getFileUrl(handle).then(url => { 
+            if(active) {
+                setSrc(url);
+            } else {
+                URL.revokeObjectURL(url);
+            }
+        });
+
+        return () => { 
+            active = false; 
+            // We rely on the next effect cycle or parent unmount to cleanup, 
+            // but explicitly cleaning up here is safer for memory.
+        };
     }, [handle, isActive]);
+
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => {
+            if (src) URL.revokeObjectURL(src);
+        };
+    }, [src]);
+
     if (!src) return <div className="w-full h-full flex items-center justify-center text-[var(--text-muted)] bg-[var(--bg-card)]/10"><div className="w-8 h-8 rounded-full border-2 border-t-[var(--accent)] animate-spin"/></div>;
-    return <img src={src} alt={alt} className={`${className} pointer-events-none select-none`} style={style} />;
+    return <img src={src} alt={alt} className={`${className} pointer-events-none select-none`} style={style} loading="eager" decoding="async" />;
 });
 
 // Left Sidebar Thumbnail Scrubber
@@ -71,36 +125,52 @@ const ThumbnailScrubber: React.FC<{
     pdfDoc: any; 
     isPdf: boolean;
 }> = ({ pages, currentPage, onJump, pdfDoc, isPdf }) => {
+    const [isHovered, setIsHovered] = useState(false);
+
     return (
-        <div className="fixed left-0 top-0 bottom-0 w-16 hover:w-24 bg-[var(--bg-main)]/30 hover:bg-[var(--bg-main)]/90 backdrop-blur-sm border-r border-[var(--border-color)] z-[60] transition-all duration-300 overflow-y-auto scrollbar-hide group flex flex-col items-center py-4 gap-2">
-            {pages.map((p, idx) => (
-                <div 
-                    key={idx} 
-                    onClick={() => onJump(idx)}
-                    className={`relative w-10 h-14 hover:w-16 hover:h-24 transition-all duration-300 flex-shrink-0 cursor-pointer rounded overflow-hidden border ${idx === currentPage ? 'border-[var(--accent)]' : 'border-transparent hover:border-[var(--text-muted)]'}`}
-                >
-                    {/* Render minimal thumbnail. For pure image folders, using full LazyImagePage with small dimensions is okay if browser caches, 
-                        but ideally we'd generate real thumbs. For simplicity, we stick to LazyImagePage but it will load full size img and downscale. */}
-                    {Math.abs(currentPage - idx) < 20 && ( // Only render thumbs near current for perf
-                        isPdf ? (
-                            <div className="w-full h-full bg-white" /> 
-                        ) : (
-                            <LazyImagePage handle={p.handle} isActive={true} alt={`Pg ${idx}`} className="w-full h-full object-cover" />
-                        )
-                    )}
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/20 text-[8px] text-white font-mono opacity-0 group-hover:opacity-100">
-                        {idx + 1}
-                    </div>
-                </div>
-            ))}
+        <div 
+            className="fixed left-0 top-0 bottom-0 z-[60] flex group"
+            onMouseEnter={() => setIsHovered(true)}
+            onMouseLeave={() => setIsHovered(false)}
+        >
+            {/* Trigger Zone */}
+            <div className="w-6 h-full bg-transparent group-hover:bg-[var(--bg-main)]/10 transition-colors duration-300"></div>
+            
+            {/* Drawer */}
+            <div className={`w-24 bg-[var(--bg-main)]/95 backdrop-blur-md border-r border-[var(--border-color)] transition-all duration-300 ease-[var(--ease-out-expo)] overflow-y-auto overflow-x-hidden scrollbar-hide flex flex-col items-center py-4 gap-2 absolute left-0 top-0 bottom-0 ${isHovered ? 'translate-x-0 opacity-100 shadow-2xl' : '-translate-x-full opacity-0'}`}>
+                {pages.map((p, idx) => {
+                    // Only render thumbnails close to current page OR if the drawer is hovered
+                    // This saves massive memory
+                    const shouldRender = isHovered && Math.abs(currentPage - idx) < 20;
+
+                    return (
+                        <div 
+                            key={idx} 
+                            onClick={() => onJump(idx)}
+                            className={`relative w-16 h-24 flex-shrink-0 cursor-pointer rounded overflow-hidden border transition-all duration-300 ${idx === currentPage ? 'border-[var(--accent)] ring-2 ring-[var(--accent)]/20' : 'border-transparent hover:border-[var(--text-muted)]'}`}
+                        >
+                            {shouldRender && (
+                                isPdf ? (
+                                    <div className="w-full h-full bg-white text-[8px] text-black flex items-center justify-center">PDF</div> 
+                                ) : (
+                                    <LazyImagePage handle={p.handle} isActive={true} alt={`Pg ${idx}`} className="w-full h-full object-cover" />
+                                )
+                            )}
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/40 text-[10px] text-white font-mono font-bold">
+                                {idx + 1}
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
         </div>
     );
 }
 
-export const ReaderView: React.FC<ReaderViewProps> = ({ 
+export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(({ 
     book, onClose, onUpdateProgress, settings, onSettingChange, 
-    onRegisterBookmarkAction, onBookmarkStatusChange 
-}) => {
+    onBookmarkStatusChange 
+}, ref) => {
   const [currentPage, setCurrentPage] = useState(() => book.readingProgress?.currentPageIndex || 0);
   const [pdfDoc, setPdfDoc] = useState<any>(null);
   const [pdfPages, setPdfPages] = useState<number>(0);
@@ -110,9 +180,9 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
   const [bookmarks, setBookmarks] = useState<Set<number>>(new Set());
   const [isClosing, setIsClosing] = useState(false);
   
-  const [isFlipping, setIsFlipping] = useState(false);
-  const [flipDirection, setFlipDirection] = useState<'next' | 'prev'>('next');
-  const [flipPhase, setFlipPhase] = useState<'out' | 'in-start' | 'in-end' | 'idle'>('idle');
+  // Transition State
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [transitionPhase, setTransitionPhase] = useState<'enter' | 'exit' | 'idle'>('idle');
   const [showStamp, setShowStamp] = useState(false);
 
   // --- ZOOM ENGINE STATE ---
@@ -131,26 +201,28 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
       loadBookmarks();
   }, [book.id]);
 
-  // Update External Menu State
+  // Sync bookmark status with parent for UI
   useEffect(() => {
       onBookmarkStatusChange(bookmarks.has(currentPage));
-  }, [bookmarks, currentPage, onBookmarkStatusChange]);
+  }, [currentPage, bookmarks, onBookmarkStatusChange]);
 
-  // Register bookmark action to menu
-  useEffect(() => {
-      onRegisterBookmarkAction(async () => {
-          const newSet = new Set(bookmarks);
-          if (newSet.has(currentPage)) {
-              newSet.delete(currentPage);
+  // Expose toggleBookmark to parent via ref
+  useImperativeHandle(ref, () => ({
+      toggleBookmark: async () => {
+          const currentSet = new Set(bookmarks);
+          const isMarked = currentSet.has(currentPage);
+          
+          if (isMarked) {
+              currentSet.delete(currentPage);
               await dbRemoveBookmark(book.id, currentPage);
           } else {
-              newSet.add(currentPage);
+              currentSet.add(currentPage);
               await dbAddBookmark(book.id, currentPage);
           }
-          setBookmarks(newSet);
-          if(settings.enableSfx) playClickSfx();
-      });
-  }, [bookmarks, currentPage, book.id, settings.enableSfx, onRegisterBookmarkAction]);
+          
+          setBookmarks(currentSet);
+      }
+  }));
 
   // Load PDF
   useEffect(() => {
@@ -193,7 +265,16 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
   }, []);
 
   const navigate = useCallback((direction: 'next' | 'prev') => {
-      if (settings.viewMode === 'vertical' || settings.viewMode === 'grid') return;
+      if (settings.viewMode === 'vertical' || settings.viewMode === 'grid') {
+          // For vertical, we ideally scroll. But if keyboard used, we can jump pages.
+          let delta = direction === 'next' ? 1 : -1;
+          const next = Math.min(Math.max(0, currentPage + delta), totalPages - 1);
+          setCurrentPage(next);
+          // Scroll into view logic handled by the render loop
+          const el = document.querySelector(`[data-index="${next}"]`);
+          el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          return;
+      }
       
       const isSpread = settings.viewMode === 'spread';
       let delta = settings.direction === 'LTR' ? 1 : -1;
@@ -208,22 +289,41 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
       
       if (next >= 0 && next < totalPages) {
           if (settings.enableSfx) playPageTurnSfx();
-          setFlipDirection(direction);
-          setIsFlipping(true);
-          setFlipPhase('out');
+          
+          setIsTransitioning(true);
+          setTransitionPhase('exit'); // Start exit anim
           resetZoom();
+
+          // Duration depends on mode
+          const duration = settings.transitionMode === 'smooth' ? 300 : 50; // Faster for snap/none
+
           setTimeout(() => {
               setCurrentPage(next);
-              setFlipPhase('in-start');
+              setTransitionPhase('enter'); // Start enter anim
               requestAnimationFrame(() => {
-                  requestAnimationFrame(() => {
-                      setFlipPhase('in-end');
-                      setTimeout(() => { setFlipPhase('idle'); setIsFlipping(false); }, 400);
-                  });
+                 setTimeout(() => {
+                     setTransitionPhase('idle');
+                     setIsTransitioning(false);
+                 }, duration);
               });
-          }, 300);
+          }, duration);
       }
   }, [currentPage, totalPages, settings, resetZoom]);
+
+  // Keyboard Support
+  useEffect(() => {
+      const handleKeyDown = (e: KeyboardEvent) => {
+          if (e.key === 'ArrowLeft') {
+              navigate(settings.direction === 'LTR' ? 'prev' : 'next');
+          } else if (e.key === 'ArrowRight') {
+              navigate(settings.direction === 'LTR' ? 'next' : 'prev');
+          } else if (e.key === 'Escape') {
+              onClose();
+          }
+      };
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [navigate, settings.direction, onClose]);
 
   const wheelTimeout = useRef<any>(null);
 
@@ -251,13 +351,11 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
          return;
       }
       
-      // 3. PAGE TURN / NAVIGATION (If not zoomed in, vertical scroll)
-      // Works for Single and Spread modes
+      // 3. PAGE TURN (Vertical scroll when NOT zoomed)
       if (settings.viewMode !== 'vertical' && settings.viewMode !== 'grid') {
           if (Math.abs(e.deltaY) > 30) {
              if (wheelTimeout.current) return;
              
-             // Inverted logic for natural scroll: Scroll Down -> Next Page
              const isNext = e.deltaY > 0;
              const isPrev = e.deltaY < 0;
 
@@ -303,18 +401,21 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                   <LazyImagePage handle={book.pages[idx].handle} isActive={active} alt={`Page ${idx}`} style={getImageStyle()} />
               )}
               {isMarked && (
-                  <div className="absolute top-0 right-4 w-6 h-10 bg-[var(--accent)] shadow-lg z-20 flex items-end justify-center pb-1 mix-blend-multiply opacity-80">
-                      <BookmarkIcon className="w-3 h-3 text-[var(--bg-card)] fill-current mb-1" />
+                  <div className="absolute top-0 right-8 w-8 h-12 bg-red-600 shadow-lg z-20 flex items-end justify-center pb-2 animate-in fade-in slide-in-from-top-4 duration-300">
+                      <BookmarkIcon className="w-4 h-4 text-white fill-current" />
+                      <div className="absolute -bottom-4 left-0 w-0 h-0 border-l-[16px] border-l-red-600 border-r-[16px] border-r-red-600 border-b-[16px] border-b-transparent"></div>
                   </div>
               )}
           </div>
       );
   };
 
-  const getFlipClass = () => {
-      if (!isFlipping) return '';
-      if (settings.transitionMode === 'datamosh') return 'datamosh-active';
-      return flipPhase === 'out' ? 'flip-out' : flipPhase === 'in-start' ? 'flip-in-start' : 'flip-in-end';
+  const getTransitionClass = () => {
+      if (!isTransitioning || settings.transitionMode === 'none') return '';
+      // Map modes to CSS classes defined in index.html
+      // .fx-snap-enter, .fx-smooth-enter, etc.
+      const mode = settings.transitionMode;
+      return `fx-${mode}-${transitionPhase}`;
   };
 
   // --- RENDER ---
@@ -337,8 +438,24 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
       />
 
       {/* Main Viewport */}
-      <div className={`relative flex-1 w-full h-full overflow-hidden pl-16 ${scaleDisplay > 1 ? 'cursor-grab active:cursor-grabbing' : ''}`}>
+      <div className={`relative flex-1 w-full h-full overflow-hidden pl-0 ${scaleDisplay > 1 ? 'cursor-grab active:cursor-grabbing' : ''}`}>
           
+          {/* CLICK ZONES FOR NAVIGATION (Invisible) */}
+          {(settings.viewMode === 'single' || settings.viewMode === 'spread') && (
+              <>
+                <div 
+                    className="absolute top-0 bottom-0 left-0 w-[15%] z-40 cursor-w-resize"
+                    onClick={(e) => { e.stopPropagation(); navigate('prev'); }}
+                    title="Previous Page"
+                />
+                <div 
+                    className="absolute top-0 bottom-0 right-0 w-[15%] z-40 cursor-e-resize"
+                    onClick={(e) => { e.stopPropagation(); navigate('next'); }}
+                    title="Next Page"
+                />
+              </>
+          )}
+
           {/* GRID MODE */}
           {settings.viewMode === 'grid' && (
               <div className="w-full h-full overflow-y-auto p-8 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
@@ -351,8 +468,8 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                         }}
                         className={`relative aspect-[2/3] bg-[var(--bg-card)] cursor-pointer group rounded overflow-hidden border ${currentPage === idx ? 'border-[var(--accent)]' : 'border-[var(--border-color)] hover:border-[var(--text-main)]'}`}
                       >
-                         {Math.abs(currentPage - idx) < 50 && renderContent(idx, true)}
-                         {bookmarks.has(idx) && <div className="absolute top-2 right-2 text-[var(--accent)]"><BookmarkIcon className="w-4 h-4 fill-current"/></div>}
+                         {Math.abs(currentPage - idx) < 20 && renderContent(idx, true)}
+                         {bookmarks.has(idx) && <div className="absolute top-2 right-2 text-red-500"><BookmarkIcon className="w-4 h-4 fill-current"/></div>}
                          <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-[10px] p-1 text-center opacity-0 group-hover:opacity-100">
                              {idx + 1}
                          </div>
@@ -365,13 +482,12 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
           {settings.viewMode === 'vertical' && (
               <div className="w-full h-full overflow-y-auto" onScroll={(e) => {
                  const el = e.target as HTMLElement;
-                 // Calculate simplified index based on scroll pos
                  const index = Math.min(totalPages - 1, Math.max(0, Math.floor((el.scrollTop / el.scrollHeight) * totalPages)));
-                 // Only update if significantly changed to avoid jitter, or rely on intersection observer (simplified here)
+                 if (Math.abs(index - currentPage) > 0) setCurrentPage(index);
               }}>
                  {Array.from({ length: totalPages }).map((_, idx) => (
                     <div key={idx} data-index={idx} className="page-container flex justify-center mb-8 min-h-[50vh]">
-                       {Math.abs(currentPage - idx) < 5 && renderContent(idx, true)}
+                       {Math.abs(currentPage - idx) < 3 && renderContent(idx, true)}
                     </div>
                  ))}
                  {showStamp && (
@@ -389,7 +505,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
               <div className="w-full h-full flex items-center justify-center perspective-2000" onDoubleClick={resetZoom}>
                   <div
                      ref={contentRef}
-                     className={`relative w-full h-full flex items-center justify-center flip-container ${getFlipClass()}`}
+                     className={`relative w-full h-full flex items-center justify-center ${getTransitionClass()}`}
                      style={{ transformOrigin: 'center center' }}
                   >
                       {settings.viewMode === 'spread' && currentPage > 0 && currentPage < totalPages ? (
@@ -417,4 +533,4 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
       </div>
     </div>
   );
-};
+});

@@ -1,5 +1,4 @@
 
-
 // --- File System Types ---
 export interface FileHandle extends FileSystemFileHandle {
   readonly kind: 'file';
@@ -118,7 +117,7 @@ export type ImageFitMode = 'contain' | 'width' | 'height' | 'original';
 export interface ReaderSettings {
     direction: ReadingDirection;
     fitMode: ImageFitMode;
-    viewMode: 'single' | 'vertical' | 'spread' | 'grid'; // Added 'grid'
+    viewMode: 'single' | 'vertical' | 'spread' | 'grid'; 
     slideshowInterval: number; // seconds
     smartSplit: boolean; 
     
@@ -126,6 +125,8 @@ export interface ReaderSettings {
     enableSfx: boolean;
     atmosphere: 'none' | 'rain' | 'vinyl';
     lightingMode: 'ambient' | 'spotlight';
-    textureMode: 'none' | 'grain' | 'halftone' | 'fabric';
-    transitionMode: 'none' | 'slide' | 'flip' | 'datamosh';
+    
+    // UPDATED TEXTURES & TRANSITIONS
+    textureMode: 'none' | 'paper';
+    transitionMode: 'none' | 'snap' | 'smooth' | 'fade';
 }

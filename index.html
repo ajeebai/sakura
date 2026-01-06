@@ -13,55 +13,24 @@
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,400&family=Inter:wght@200;300;400;500&family=JetBrains+Mono:wght@300&family=Noto+Serif+JP:wght@700&display=swap" rel="stylesheet">
 
     <style>
-      /* --- SVG FILTERS (Invisible but referenced) --- */
-      .svg-filters { position: absolute; width: 0; height: 0; pointer-events: none; }
-
       /* --- GLOBAL TEXTURES --- */
       
       .texture-layer {
         position: fixed;
         inset: 0;
         pointer-events: none;
-        z-index: 9999;
-        mix-blend-mode: soft-light;
+        z-index: 9990;
         opacity: 0;
-        transition: opacity 0.5s ease;
+        transition: opacity 1s ease;
       }
 
-      /* Animated Film Grain */
-      @keyframes grain {
-        0%, 100% { transform: translate(0, 0); }
-        10% { transform: translate(-5%, -10%); }
-        20% { transform: translate(-15%, 5%); }
-        30% { transform: translate(7%, -25%); }
-        40% { transform: translate(-5%, 25%); }
-        50% { transform: translate(-15%, 10%); }
-        60% { transform: translate(15%, 0%); }
-        70% { transform: translate(0%, 15%); }
-        80% { transform: translate(3%, 35%); }
-        90% { transform: translate(-10%, 10%); }
-      }
-
-      body[data-texture="grain"] .texture-layer.grain {
-        opacity: 0.15;
-        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.5' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
-        animation: grain 8s steps(10) infinite;
-        mix-blend-mode: overlay;
-      }
-
-      /* Halftone Pattern */
-      body[data-texture="halftone"] .texture-layer.halftone {
-        opacity: 0.8;
-        background-image: radial-gradient(circle, #000 1.5px, transparent 2px);
-        background-size: 6px 6px;
-        mix-blend-mode: overlay;
-      }
-
-      /* Fabric / Canvas */
-      body[data-texture="fabric"] .texture-layer.fabric {
+      /* Fine Manga Paper Texture */
+      /* Static noise with multiply blend for fibrous feel */
+      body[data-texture="paper"] .texture-layer.paper {
         opacity: 0.6;
-        background-image: url("data:image/svg+xml,%3Csvg width='6' height='6' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%239C92AC' fill-opacity='0.4' fill-rule='evenodd'%3E%3Cpath d='M5 0h1L0 6V5zM6 5v1H5z'/%3E%3C/g%3E%3C/svg%3E");
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.4'/%3E%3C/svg%3E");
         mix-blend-mode: multiply;
+        filter: contrast(120%) brightness(105%);
       }
 
       /* Lighting */
@@ -75,6 +44,42 @@
         transition: opacity 0.5s ease;
       }
       body[data-lighting="spotlight"] .spotlight-mask { opacity: 1; }
+
+      /* --- PAGE TRANSITIONS --- */
+
+      /* SNAP: Fast, tactile impulse */
+      .fx-snap-enter {
+        animation: snap-in 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+      }
+      @keyframes snap-in {
+        0% { opacity: 0.8; transform: scale(0.98); }
+        100% { opacity: 1; transform: scale(1); }
+      }
+
+      /* SMOOTH: Luxurious slide */
+      .fx-smooth-enter {
+        animation: smooth-in 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+      }
+      .fx-smooth-exit {
+        animation: smooth-out 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+      }
+      @keyframes smooth-in {
+        from { opacity: 0; transform: translateX(20px); }
+        to { opacity: 1; transform: translateX(0); }
+      }
+      @keyframes smooth-out {
+        from { opacity: 1; transform: translateX(0); }
+        to { opacity: 0; transform: translateX(-20px); }
+      }
+
+      /* FADE: Simple dissolve */
+      .fx-fade-enter {
+        animation: fade-in 0.3s ease-out forwards;
+      }
+      @keyframes fade-in {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
 
       /* --- SCROLLBARS --- */
       ::-webkit-scrollbar { width: 0px; height: 0px; background: transparent; }
@@ -166,12 +171,6 @@
         backdrop-filter: blur(20px);
         -webkit-backdrop-filter: blur(20px);
       }
-      
-      /* --- TRUE DATAMOSH (SVG FILTER) --- */
-      .datamosh-active {
-        filter: url(#datamosh-filter) contrast(1.4) brightness(1.1);
-        transform: scale(1.02);
-      }
 
       /* Hanko Stamp Animation */
       @keyframes stamp-slam {
@@ -193,9 +192,6 @@
       .patina-crease {
         background: linear-gradient(135deg, transparent 90%, rgba(0,0,0,0.1) 95%, rgba(0,0,0,0.2) 100%);
         pointer-events: none;
-      }
-      .patina-sunbleach {
-        filter: sepia(0.2) contrast(0.95) brightness(1.05);
       }
       
       /* Loader */
@@ -232,21 +228,9 @@
   }
 </script>
 </head>
-  <body class="antialiased overflow-hidden" data-texture="grain" data-lighting="ambient">
+  <body class="antialiased overflow-hidden" data-texture="paper" data-lighting="ambient">
     
-    <!-- SVG Filters Definition -->
-    <svg class="svg-filters">
-        <defs>
-            <filter id="datamosh-filter">
-                <feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="2" result="noise" />
-                <feDisplacementMap in="SourceGraphic" in2="noise" scale="40" xChannelSelector="R" yChannelSelector="G" />
-            </filter>
-        </defs>
-    </svg>
-
-    <div class="texture-layer grain"></div>
-    <div class="texture-layer halftone"></div>
-    <div class="texture-layer fabric"></div>
+    <div class="texture-layer paper"></div>
     
     <div class="spotlight-mask"></div>
     <div id="root"></div>

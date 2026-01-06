@@ -1,23 +1,33 @@
-import React, { Component, ErrorInfo, ReactNode } from "react";
+
+import React, { ErrorInfo, ReactNode } from "react";
 import { AlertTriangle, RefreshCw, Trash2 } from 'lucide-react';
 import { deleteDB } from 'idb';
 
-interface Props {
+interface ErrorBoundaryProps {
   children?: ReactNode;
 }
 
-interface State {
+interface ErrorBoundaryState {
   hasError: boolean;
   error: Error | null;
 }
 
-export class ErrorBoundary extends Component<Props, State> {
-  public state: State = {
+export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  // Explicitly defined props to avoid TypeScript error "Property 'props' does not exist on type 'ErrorBoundary'"
+  // This can happen depending on strict config or React type version mismatches.
+  public readonly props: Readonly<ErrorBoundaryProps>;
+
+  public state: ErrorBoundaryState = {
     hasError: false,
     error: null
   };
 
-  static getDerivedStateFromError(error: Error): State {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.props = props;
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { hasError: true, error };
   }
 
@@ -82,3 +92,4 @@ export class ErrorBoundary extends Component<Props, State> {
     return this.props.children;
   }
 }
+    

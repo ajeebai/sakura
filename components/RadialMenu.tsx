@@ -106,7 +106,7 @@ export const RadialMenu: React.FC<RadialMenuProps> = ({
 
         // Root Level Generation
         const themes: Theme[] = ['sakura-night', 'ivory-paper', 'ink-blossom', 'cyber-grid', 'autumn-scroll', 'nordic-frost'];
-        const transitions = ['none', 'slide', 'flip', 'datamosh'];
+        const transitions = ['none', 'snap', 'smooth', 'fade'];
 
         const commonItems: MenuItem[] = [
              {
@@ -120,7 +120,7 @@ export const RadialMenu: React.FC<RadialMenuProps> = ({
                 icon: <Layers className="w-5 h-5" />,
                 label: 'Texture',
                 action: () => {
-                    const modes = ['none', 'grain', 'halftone', 'fabric'];
+                    const modes = ['none', 'paper'];
                     onSettingChange('textureMode', modes[(modes.indexOf(settings.textureMode) + 1) % modes.length]);
                 }
             }

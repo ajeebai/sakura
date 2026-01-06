@@ -2,7 +2,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { LibraryView } from './components/LibraryView';
-import { ReaderView } from './components/ReaderView';
+import { ReaderView, ReaderViewHandle } from './components/ReaderView';
 import { LibraryList } from './components/LibraryList';
 import { AppShell } from './components/AppShell';
 import { RadialMenu } from './components/RadialMenu';
@@ -32,7 +32,7 @@ const SakuraApp: React.FC = () => {
   const [settings, setSettings] = useState<ReaderSettings>({
       direction: 'LTR', fitMode: 'contain', viewMode: 'vertical', 
       slideshowInterval: 3, smartSplit: false,
-      enableSfx: true, textureMode: 'grain', transitionMode: 'slide',
+      enableSfx: true, textureMode: 'paper', transitionMode: 'snap',
       atmosphere: 'none', lightingMode: 'ambient'
   });
   const [libViewMode, setLibViewMode] = useState<LibraryViewMode>('category');
@@ -43,8 +43,8 @@ const SakuraApp: React.FC = () => {
   const [bookToCurate, setBookToCurate] = useState<string | null>(null);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
 
-  // Reader Actions State (for Menu)
-  const [bookmarkAction, setBookmarkAction] = useState<(() => void) | null>(null);
+  // Reader Actions Ref
+  const readerRef = useRef<ReaderViewHandle>(null);
   const [isPageBookmarked, setIsPageBookmarked] = useState(false);
 
   // Virtual Book State (Collected Moments)
@@ -368,7 +368,6 @@ const SakuraApp: React.FC = () => {
   };
 
   const handleAddToCuration = async (playlistId: string | null, newName?: string) => {
-      if (!bookToCurate) return;
       let targetId = playlistId;
 
       if (!targetId && newName) {
@@ -376,10 +375,11 @@ const SakuraApp: React.FC = () => {
           targetId = newPl.id;
       }
 
-      if (targetId) {
+      if (targetId && bookToCurate) {
           await dbAddBookToPlaylist(targetId, bookToCurate);
-          await refreshPlaylists();
       }
+      
+      await refreshPlaylists();
       setCurationModalOpen(false);
       setBookToCurate(null);
   };
@@ -406,7 +406,7 @@ const SakuraApp: React.FC = () => {
                 setCurationModalOpen(true);
             }}
             onEditBook={() => {}}
-            onTogglePageBookmark={() => bookmarkAction && bookmarkAction()}
+            onTogglePageBookmark={() => readerRef.current?.toggleBookmark()}
             isPageBookmarked={isPageBookmarked}
         />
 
@@ -422,12 +422,12 @@ const SakuraApp: React.FC = () => {
              />
         ) : state.view === 'READER' && activeBook ? (
             <ReaderView 
+              ref={readerRef}
               book={activeBook} 
               onClose={handleCloseReader} 
               onUpdateProgress={handleUpdateProgress}
               settings={settings} 
               onSettingChange={handleSettingChange}
-              onRegisterBookmarkAction={setBookmarkAction}
               onBookmarkStatusChange={setIsPageBookmarked}
             />
         ) : (
@@ -493,12 +493,5 @@ const SakuraApp: React.FC = () => {
   );
 };
 
-const App: React.FC = () => {
-  return (
-    <ErrorBoundary>
-      <SakuraApp />
-    </ErrorBoundary>
-  );
-};
-
-export default App;
+export default SakuraApp;
+    

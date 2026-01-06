@@ -3,7 +3,7 @@ import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react'
 import { Book, LibraryViewMode, Playlist, BookMetadata, FileHandle, Page } from '../types';
 import { generateThumbnail, generatePdfThumbnail, generateArchiveThumbnail } from '../utils/imageUtils';
 import { dbUpdateBook, dbGetFavoriteFolders, dbGetPlaylists, dbCreatePlaylist, dbAddBookToPlaylist, dbDeletePlaylist, dbGetAllBookmarks, dbGetBooksForLibrary, dbGetAllProgress } from '../services/db';
-import { Search, Heart, ChevronLeft, Folder, X, Plus, MoreVertical, Trash2, FolderHeart, Sparkles } from 'lucide-react';
+import { Search, Heart, ChevronLeft, Folder, X, Plus, MoreVertical, Trash2, FolderHeart, Sparkles, Bookmark } from 'lucide-react';
 import { EditBookModal } from './EditBookModal';
 import { CurationModal } from './CurationModal';
 import { naturalSort } from '../utils/fileUtils';
@@ -21,7 +21,6 @@ interface LibraryViewProps {
   isSearchOpen: boolean; 
   onToggleSearch: (open: boolean) => void;
   onOpenVirtualBook: (book: Book) => void;
-  // New: Passed from App for sync
   playlists: Playlist[];
   onRefreshPlaylists: () => void;
 }
@@ -39,6 +38,7 @@ const PatinaOverlay: React.FC<{ readCount: number }> = ({ readCount }) => {
     );
 };
 
+// Enhanced BookCard with Preview Glimpses
 const BookCard: React.FC<{ 
     book: Book; 
     onClick: () => void;
@@ -51,7 +51,11 @@ const BookCard: React.FC<{
     style?: React.CSSProperties;
 }> = React.memo(({ book, onClick, onContextMenu, width, height, className, priority, showProgress = true, style }) => {
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
+  const [isHovered, setIsHovered] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewIndex, setPreviewIndex] = useState(0);
 
+  // Load Cover
   useEffect(() => {
     let active = true;
     const loadCover = async () => {
@@ -74,33 +78,81 @@ const BookCard: React.FC<{
     return () => { active = false; if (coverUrl) URL.revokeObjectURL(coverUrl); };
   }, [book.id, book.coverImage]); 
 
+  // Preview Logic
+  useEffect(() => {
+      let interval: any = null;
+      let activeUrl: string | null = null;
+
+      if (isHovered && book.pages && book.pages.length > 1) {
+          let idx = 1; // Start from page 1, 0 is cover usually
+          interval = setInterval(async () => {
+              if (idx >= Math.min(6, book.pages.length)) idx = 1;
+              const page = book.pages[idx];
+              if (page && page.handle) {
+                   try {
+                       const url = await getFileUrl(page.handle);
+                       // Revoke previous preview
+                       if(activeUrl) URL.revokeObjectURL(activeUrl);
+                       activeUrl = url;
+                       setPreviewUrl(url);
+                       setPreviewIndex(idx);
+                   } catch(e) {}
+              }
+              idx++;
+          }, 800);
+      } else {
+          setPreviewUrl(null);
+          setPreviewIndex(0);
+          if (activeUrl) URL.revokeObjectURL(activeUrl);
+      }
+
+      return () => {
+          if (interval) clearInterval(interval);
+          if (activeUrl) URL.revokeObjectURL(activeUrl);
+      };
+  }, [isHovered, book.pages]);
+
   const progress = book.readingProgress;
   const percentage = progress?.percentage || 0;
+  const displayUrl = previewUrl || coverUrl;
 
   return (
     <div 
       onClick={onClick}
       onContextMenu={(e) => onContextMenu && onContextMenu(e, book)}
-      onMouseEnter={() => playHoverSfx()}
+      onMouseEnter={() => { setIsHovered(true); playHoverSfx(); }}
+      onMouseLeave={() => setIsHovered(false)}
       className={`relative flex-shrink-0 cursor-pointer group ${book.isHidden ? 'opacity-40' : 'opacity-100'} ${className || ''}`}
       style={{ width, height, ...style }}
       data-book-id={book.id}
     >
-      <div className={`relative w-full h-full bg-[var(--bg-card)] overflow-hidden transition-all duration-300 ease-[var(--ease-out-expo)] aspect-[2/3] border border-[var(--border-color)] shadow-md group-hover:scale-105 group-hover:shadow-xl group-hover:border-[var(--text-main)] group-hover:z-50 rounded-sm`}>
+      <div className={`relative w-full h-full bg-[var(--bg-card)] overflow-hidden transition-all duration-300 ease-[var(--ease-out-expo)] aspect-[2/3] border border-[var(--border-color)] shadow-md group-hover:scale-110 group-hover:shadow-2xl group-hover:border-[var(--text-main)] group-hover:z-50 rounded-sm origin-bottom`}>
         <PatinaOverlay readCount={book.readCount || 0} />
-        {coverUrl ? (
-          <img src={coverUrl} alt={book.title} className="w-full h-full object-cover grayscale-[0.2] contrast-[1.1] transition-all duration-1000 group-hover:grayscale-0" loading={priority ? "eager" : "lazy"} />
+        
+        {displayUrl ? (
+          <img 
+            src={displayUrl} 
+            alt={book.title} 
+            className={`w-full h-full object-cover transition-all duration-500 ${isHovered ? 'grayscale-0' : 'grayscale-[0.2] contrast-[1.1]'}`} 
+            loading={priority ? "eager" : "lazy"} 
+          />
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center bg-[var(--bg-card)] p-4 border border-dashed border-[var(--border-color)]">
             <span className="mono text-[10px] uppercase text-[var(--text-muted)] tracking-widest break-all text-center">{book.title.slice(0, 4)}</span>
           </div>
         )}
+
         <div className={`absolute inset-0 bg-gradient-to-t from-[var(--bg-overlay)] via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 flex flex-col justify-end p-4 z-30`}>
              <h3 className="text-[var(--text-main)] font-medium text-sm leading-tight line-clamp-2 font-serif drop-shadow-md">{book.title}</h3>
+             {isHovered && previewUrl && (
+                 <span className="mono text-[8px] text-[var(--accent)] mt-1 animate-pulse">Previewing Page {previewIndex + 1}</span>
+             )}
         </div>
+        
         {book.isFavorite && (
             <div className="absolute top-2 right-2 text-[var(--accent)] drop-shadow-md z-30"><Heart className="w-3 h-3 fill-current" /></div>
         )}
+        
         {showProgress && percentage > 0 && percentage < 100 && (
             <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-black/20 z-30">
                 <div className="h-full bg-[var(--accent)]" style={{ width: `${percentage}%` }} />
@@ -123,6 +175,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   const [currentPath, setCurrentPath] = useState<string>(''); 
   const [favoriteFolders, setFavoriteFolders] = useState<Set<string>>(new Set());
   const [editingBookId, setEditingBookId] = useState<string | null>(null);
+  const [bookmarkCount, setBookmarkCount] = useState(0);
   
   // Curation Modal State
   const [isCurationModalOpen, setIsCurationModalOpen] = useState(false);
@@ -130,8 +183,14 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
 
   useEffect(() => { 
       dbGetFavoriteFolders().then(folders => setFavoriteFolders(new Set(folders))); 
-      // Playlists passed via props now
   }, []);
+  
+  // Refresh bookmark count when entering bookmark tab
+  useEffect(() => {
+      if (activeTab === 'bookmarks') {
+          dbGetAllBookmarks().then(res => setBookmarkCount(res.length));
+      }
+  }, [activeTab]);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -165,14 +224,13 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
     return { categorizedGroups: resultGroups, currentFolderBooks: flatBooks };
   }, [sortedBooks, currentPath, viewMode]);
 
-  const bookmarkedBooks = useMemo(() => books.filter(b => b.isFavorite), [books]);
+  const favoriteBooks = useMemo(() => books.filter(b => b.isFavorite), [books]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent, book: Book) => {
       e.preventDefault(); 
   }, []);
 
   const handleAddToCuration = async (playlistId: string | null, newName?: string) => {
-      if (!bookToCurate) return;
       let targetId = playlistId;
 
       if (!targetId && newName) {
@@ -180,10 +238,12 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           targetId = newPl.id;
       }
 
-      if (targetId) {
+      if (targetId && bookToCurate) {
           await dbAddBookToPlaylist(targetId, bookToCurate);
-          onRefreshPlaylists();
       }
+      // If bookToCurate is null, we just created a playlist which is valid behavior
+      
+      onRefreshPlaylists();
       setIsCurationModalOpen(false);
       setBookToCurate(null);
   };
@@ -252,7 +312,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                                 </h2>
                                 <span className="mono text-[10px] text-[var(--text-muted)] opacity-0 group-hover:opacity-100 transition-opacity">Open Folder</span>
                            </div>
-                           <div className="flex overflow-x-auto gap-6 pb-4 scrollbar-hide -mx-4 px-4 py-4">
+                           <div className="flex overflow-x-auto gap-6 pb-4 scrollbar-hide -mx-4 px-4 py-8">
                                {group.books.map(b => (
                                    <BookCard key={b.id} book={b} width={180} height={270} onClick={() => onSelectBook(b.id)} onContextMenu={handleContextMenu} />
                                ))}
@@ -297,6 +357,24 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
               </button>
           </div>
           <div className="space-y-12">
+              {/* Favorites - Permanent Curation */}
+              <div className="relative">
+                  <div className="flex items-center gap-4 mb-6 border-b border-[var(--border-color)] pb-2">
+                      <h3 className="text-xl font-serif flex items-center gap-2 text-[var(--accent)]">
+                          <Heart className="w-5 h-5 fill-current" />
+                          Favorites
+                      </h3>
+                      <span className="mono text-xs text-[var(--text-muted)]">{favoriteBooks.length} items</span>
+                  </div>
+                  <div className="flex overflow-x-auto gap-6 pb-4 scrollbar-hide -mx-4 px-4 py-8">
+                      {favoriteBooks.length === 0 && <div className="text-[var(--text-muted)] italic px-4 text-sm">No favorites yet. Heart a book to add it here.</div>}
+                      {favoriteBooks.map(b => (
+                          <BookCard key={b.id} book={b} width={160} height={240} onClick={() => onSelectBook(b.id)} onContextMenu={handleContextMenu} />
+                      ))}
+                  </div>
+              </div>
+
+              {/* Custom Playlists */}
               {playlists.map(pl => (
                   <div key={pl.id} className="relative">
                       <div className="flex items-center gap-4 mb-6 border-b border-[var(--border-color)] pb-2">
@@ -307,12 +385,12 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                           <span className="mono text-xs text-[var(--text-muted)]">{pl.bookIds.length} items</span>
                           <button onClick={() => handleDeletePlaylist(pl.id)} className="ml-auto text-red-500 hover:text-red-400 opacity-50 hover:opacity-100 transition-opacity"><Trash2 className="w-4 h-4"/></button>
                       </div>
-                      <div className="flex overflow-x-auto gap-6 pb-4 scrollbar-hide -mx-4 px-4">
+                      <div className="flex overflow-x-auto gap-6 pb-4 scrollbar-hide -mx-4 px-4 py-8">
                           {pl.bookIds.length === 0 && <div className="text-[var(--text-muted)] italic px-4 text-sm">Empty curation. Right click a book to add it.</div>}
                           {pl.bookIds.map(id => {
                               const b = books.find(book => book.id === id);
                               if (!b) return null;
-                              return <BookCard key={b.id} book={b} width={160} height={240} onClick={() => onSelectBook(b.id)} onContextMenu={handleContextMenu} />;
+                              return <BookCard key={b.id} book={b} width={160} height={240} onClick={() => onSelectBook(b.id)} onContextMenu={handleContextMenu} />
                           })}
                       </div>
                   </div>
@@ -323,7 +401,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
 
   const renderBookmarks = () => (
       <div className="px-8 pt-8 pb-32 animate-in fade-in slide-in-from-bottom-4 duration-500">
-          <h2 className="text-3xl font-serif text-[var(--text-main)] mb-8">Favorites & Moments</h2>
+          <h2 className="text-3xl font-serif text-[var(--text-main)] mb-8">Page Bookmarks</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-x-8 gap-y-12">
                
                {/* Collected Moments Card */}
@@ -337,15 +415,11 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                        <span className="absolute bottom-4 font-serif text-[var(--text-main)] text-lg">Collected Moments</span>
                        <div className="absolute inset-0 border-2 border-[var(--accent)] opacity-10 m-2" />
                    </div>
-                   <p className="font-serif text-sm text-[var(--text-muted)] group-hover:text-[var(--text-main)]">Virtual Compilation</p>
+                   <p className="font-serif text-sm text-[var(--text-muted)] group-hover:text-[var(--text-main)] flex items-center gap-2">
+                      <Bookmark className="w-3 h-3" />
+                      {bookmarkCount} Saved Pages
+                   </p>
                </div>
-
-               {bookmarkedBooks.map(book => (
-                  <div key={book.id} className="flex flex-col gap-3 group">
-                      <BookCard book={book} width="100%" height="auto" onClick={() => onSelectBook(book.id)} onContextMenu={handleContextMenu} />
-                      <p className="font-serif text-sm text-[var(--text-muted)] group-hover:text-[var(--text-main)] leading-tight">{book.title}</p>
-                  </div>
-               ))}
           </div>
       </div>
   );
@@ -376,7 +450,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
          <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-8">
              <button onClick={() => { setActiveTab('collections'); if(enableSfx) playClickSfx(); }} className={`text-sm font-serif transition-colors ${activeTab === 'collections' ? 'text-[var(--text-main)] border-b border-[var(--accent)] pb-1' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}>Collections</button>
              <button onClick={() => { setActiveTab('curations'); if(enableSfx) playClickSfx(); }} className={`text-sm font-serif transition-colors ${activeTab === 'curations' ? 'text-[var(--text-main)] border-b border-[var(--accent)] pb-1' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}>Curations</button>
-             <button onClick={() => { setActiveTab('bookmarks'); if(enableSfx) playClickSfx(); }} className={`text-sm font-serif transition-colors ${activeTab === 'bookmarks' ? 'text-[var(--text-main)] border-b border-[var(--accent)] pb-1' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}>Favorites</button>
+             <button onClick={() => { setActiveTab('bookmarks'); if(enableSfx) playClickSfx(); }} className={`text-sm font-serif transition-colors ${activeTab === 'bookmarks' ? 'text-[var(--text-main)] border-b border-[var(--accent)] pb-1' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}>Bookmarks</button>
          </div>
 
          <div className="w-24"></div> 
